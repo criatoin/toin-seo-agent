@@ -1,0 +1,3 @@
+-- Run these migrations in order in the Supabase SQL Editor
+-- Project: toin-seo-agent
+-- Order: 001 → 011 (run each file separately or paste contents in order)
