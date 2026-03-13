@@ -1,2 +1,59 @@
-from fastapi import APIRouter
+import os, sys
+from fastapi import APIRouter, Depends, BackgroundTasks
+from pydantic import BaseModel
+from auth import require_cron_or_user, require_cron
+
 router = APIRouter()
+
+# Add execution/ directory to path so scripts can be imported
+_exec_path = os.path.join(os.path.dirname(__file__), '..', '..', 'execution')
+if _exec_path not in sys.path:
+    sys.path.insert(0, _exec_path)
+
+class JobBody(BaseModel):
+    site_id: str
+
+def _run_job(module_name: str, site_id: str):
+    import importlib
+    mod = importlib.import_module(module_name)
+    mod.run(site_id)
+
+@router.post("/technical-audit")
+async def job_technical_audit(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron_or_user)):
+    bg.add_task(_run_job, "technical_audit", body.site_id)
+    return {"queued": "technical-audit", "site_id": body.site_id}
+
+@router.post("/sync-gsc")
+async def job_sync_gsc(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
+    bg.add_task(_run_job, "gsc_client", body.site_id)
+    return {"queued": "sync-gsc", "site_id": body.site_id}
+
+@router.post("/generate-proposals")
+async def job_generate_proposals(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
+    bg.add_task(_run_job, "meta_optimizer", body.site_id)
+    return {"queued": "generate-proposals", "site_id": body.site_id}
+
+@router.post("/weekly-monitor")
+async def job_weekly_monitor(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
+    bg.add_task(_run_job, "weekly_monitor", body.site_id)
+    return {"queued": "weekly-monitor", "site_id": body.site_id}
+
+@router.post("/monthly-briefing")
+async def job_monthly_briefing(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
+    bg.add_task(_run_job, "monthly_briefing", body.site_id)
+    return {"queued": "monthly-briefing", "site_id": body.site_id}
+
+@router.post("/apply-safe-routines")
+async def job_apply_safe(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
+    bg.add_task(_run_job, "apply_changes_wp", body.site_id)
+    return {"queued": "apply-safe-routines", "site_id": body.site_id}
+
+@router.post("/apply-approved")
+async def job_apply_approved(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
+    bg.add_task(_run_job, "apply_changes_wp", body.site_id)
+    return {"queued": "apply-approved", "site_id": body.site_id}
+
+@router.post("/generate-report")
+async def job_generate_report(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
+    bg.add_task(_run_job, "generate_report", body.site_id)
+    return {"queued": "generate-report", "site_id": body.site_id}
