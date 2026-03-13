@@ -48,6 +48,9 @@ def create_github_repo():
 def create_supabase_project():
     token = os.getenv("SUPABASE_ACCESS_TOKEN")
     org_id = os.getenv("SUPABASE_ORG_ID")
+    if not token or not org_id:
+        print("⚠️  SUPABASE_ACCESS_TOKEN or SUPABASE_ORG_ID missing — skipping Supabase setup")
+        return None
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     r = requests.get("https://api.supabase.com/v1/projects", headers=headers)
     r.raise_for_status()
@@ -117,3 +120,8 @@ if __name__ == "__main__":
     create_supabase_project()
     create_coolify_project()
     print("\n✅ Bootstrap completo. Rode as migrations SQL no Supabase antes de continuar.\n")
+    print("\n📝 Pending manual configuration:")
+    print("   NEXT_PUBLIC_API_URL = URL do backend após deploy no Coolify")
+    print("   PANEL_URL           = URL do frontend após deploy no Coolify")
+    print("   GSC_CLIENT_ID       = Google Cloud Console → OAuth 2.0 credentials")
+    print("   GSC_CLIENT_SECRET   = Google Cloud Console → OAuth 2.0 credentials")
