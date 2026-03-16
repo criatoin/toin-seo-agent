@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 export default function Sites() {
   const [sites, setSites]     = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [form, setForm]       = useState({ name: '', url: '', type: 'wordpress' as const })
+  const [form, setForm]       = useState<{ name: string; url: string; type: 'wordpress' | 'generic' }>({ name: '', url: '', type: 'wordpress' })
   const [saving, setSaving]   = useState(false)
 
   useEffect(() => {

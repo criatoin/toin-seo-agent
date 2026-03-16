@@ -1,9 +1,9 @@
 'use client'
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 
-export default function ConnectCallback() {
+function CallbackInner() {
   const params = useSearchParams()
   const router = useRouter()
 
@@ -30,5 +30,17 @@ export default function ConnectCallback() {
         <p className="text-gray-400">Conectando site...</p>
       </div>
     </div>
+  )
+}
+
+export default function ConnectCallback() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto" />
+      </div>
+    }>
+      <CallbackInner />
+    </Suspense>
   )
 }
