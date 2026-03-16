@@ -45,15 +45,17 @@ Return only the file content, no explanation."""
         return
 
     # Store as a schema proposal for approval
-    db.table("schema_proposals").insert({
-        "page_id":     None,
-        "schema_type": "llms_txt",
-        "schema_json": {"content": content, "filename": "llms.txt"},
-        "rationale":   "llms.txt gerado para melhorar visibilidade em AI Overviews (requer aprovação para publicar)",
-    }).execute()
-
-    log(site_id, "geo-optimizer", "generate_llms_txt", "success")
-    print(f"✅ llms.txt proposal created for {site['url']} — awaiting approval")
+    try:
+        db.table("schema_proposals").insert({
+            "page_id":     None,
+            "schema_type": "llms_txt",
+            "schema_json": {"content": content, "filename": "llms.txt"},
+            "rationale":   "llms.txt gerado para melhorar visibilidade em AI Overviews (requer aprovação para publicar)",
+        }).execute()
+        log(site_id, "geo-optimizer", "generate_llms_txt", "success")
+        print(f"✅ llms.txt proposal created for {site['url']} — awaiting approval")
+    except Exception as e:
+        log(site_id, "geo-optimizer", "generate_llms_txt", "error", error=str(e))
 
 def run(site_id: str):
     generate_llms_txt(site_id)

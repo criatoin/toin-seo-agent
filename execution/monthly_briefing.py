@@ -13,7 +13,7 @@ def run(site_id: str):
 
     # Get weak pages (candidates for merge/delete)
     pages = db.table("pages").select("*").eq("site_id", site_id).execute().data
-    weak_pages = [p for p in pages if (p.get("gsc_clicks") or 0) < 10]
+    weak_pages = [p for p in pages if p.get("gsc_clicks") is not None and p["gsc_clicks"] < 10]
 
     # Get content gaps (pages with impressions but no clicks)
     gaps = [p for p in pages if (p.get("gsc_impressions") or 0) > 50 and (p.get("gsc_clicks") or 0) == 0]
@@ -61,6 +61,12 @@ All text in Portuguese (pt-BR). Focus on data-driven suggestions."""
 
     try:
         response = complete(prompt)
+        # Strip markdown fences if present
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("```", 2)[1]
+            if response.startswith("json"):
+                response = response[4:]
         start = response.find("{")
         end   = response.rfind("}") + 1
         data  = json.loads(response[start:end])

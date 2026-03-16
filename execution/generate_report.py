@@ -47,19 +47,22 @@ Use markdown formatting."""
         markdown = f"Relatório automático — {period_start.strftime('%m/%Y')}"
         log(site_id, "generate-report", "generate_markdown", "error", error=str(e))
 
-    db.table("reports").insert({
-        "site_id":              site_id,
-        "period_start":         period_start.isoformat(),
-        "period_end":           period_end.isoformat(),
-        "markdown":             markdown,
-        "kpi_impressions":      total_impressions,
-        "kpi_clicks":           total_clicks,
-        "kpi_ctr":              round(avg_ctr, 4),
-        "kpi_avg_position":     round(avg_position, 2),
-        "kpi_issues_fixed":     len(issues),
-        "kpi_schema_coverage":  round(schema_coverage, 4),
-        "kpi_pages_optimized":  len([p for p in pages if p.get("last_meta_changed_at")]),
-    }).execute()
+    try:
+        db.table("reports").insert({
+            "site_id":              site_id,
+            "period_start":         period_start.isoformat(),
+            "period_end":           period_end.isoformat(),
+            "markdown":             markdown,
+            "kpi_impressions":      total_impressions,
+            "kpi_clicks":           total_clicks,
+            "kpi_ctr":              round(avg_ctr, 4),
+            "kpi_avg_position":     round(avg_position, 2),
+            "kpi_issues_fixed":     len(issues),
+            "kpi_schema_coverage":  round(schema_coverage, 4),
+            "kpi_pages_optimized":  len([p for p in pages if p.get("last_meta_changed_at")]),
+        }).execute()
+        log(site_id, "generate-report", "complete_report", "success")
+    except Exception as e:
+        log(site_id, "generate-report", "complete_report", "error", error=str(e))
 
-    log(site_id, "generate-report", "complete_report", "success")
     print(f"✅ Report generated for {site['url']} — {period_start.strftime('%m/%Y')}")

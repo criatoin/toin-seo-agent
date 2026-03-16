@@ -39,6 +39,12 @@ Must be valid JSON. Include all relevant properties for {schema_type}."""
 
         try:
             response = complete(prompt)
+            # Strip markdown fences if present
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```", 2)[1]
+                if response.startswith("json"):
+                    response = response[4:]
             start = response.find("{")
             end   = response.rfind("}") + 1
             schema_json = json.loads(response[start:end])

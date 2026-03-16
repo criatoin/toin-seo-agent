@@ -1,4 +1,5 @@
 """Technical audit — Phase 1."""
+from datetime import datetime, timezone
 from supabase_client import get_db, log
 from site_crawler import crawl_sitemap, crawl_page
 from pagespeed_client import analyze
@@ -26,8 +27,8 @@ def run(site_id: str):
 
     log(site_id, "technical-audit", "start_audit", "started")
 
-    # Clear old issues
-    db.table("audit_issues").delete().eq("site_id", site_id).execute()
+    # Clear old open issues only — preserve manager-actioned records
+    db.table("audit_issues").delete().eq("site_id", site_id).eq("status", "open").execute()
 
     urls = crawl_sitemap(site["url"])
     if not urls:
@@ -43,11 +44,12 @@ def run(site_id: str):
 
     for url in urls[:100]:  # limit to 100 pages per audit
         crawl = crawl_page(url)
-        if crawl.get("error"):
+        if crawl.get("error") or crawl.get("status_code", 200) not in (200, 301, 302):
             continue
 
         # Get or create page record
         existing = db.table("pages").select("id").eq("site_id", site_id).eq("url", url).execute().data
+        schema_current = crawl.get("schema")
         page_data = {
             "site_id":     site_id, "url": url,
             "title_current":     crawl["title"],
@@ -56,6 +58,8 @@ def run(site_id: str):
             "canonical_current": crawl["canonical"],
             "audit_has_h1":      len(crawl["h1s"]) == 1,
             "audit_canonical_ok": bool(crawl["canonical"]),
+            "schema_current":    schema_current,
+            "needs_schema_opt":  schema_current is None,
         }
         if existing:
             db.table("pages").update(page_data).eq("id", existing[0]["id"]).execute()
@@ -124,6 +128,6 @@ def run(site_id: str):
     except Exception:
         pass
 
-    db.table("sites").update({"audit_completed_at": "now()"}).eq("id", site_id).execute()
+    db.table("sites").update({"audit_completed_at": datetime.now(timezone.utc).isoformat()}).eq("id", site_id).execute()
     log(site_id, "technical-audit", "complete_audit", "success")
     print(f"✅ Auditoria concluída para {site['url']}")

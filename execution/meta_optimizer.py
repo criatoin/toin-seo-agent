@@ -63,9 +63,17 @@ Title max 65 chars. Description 150-160 chars. In Portuguese (pt-BR)."""
 
         try:
             response = complete(prompt)
+            # Strip markdown fences if present
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```", 2)[1]
+                if response.startswith("json"):
+                    response = response[4:]
             start = response.find("{")
             end   = response.rfind("}") + 1
             data  = json.loads(response[start:end])
+            if not all(k in data for k in ("v1", "v2", "v3")):
+                raise ValueError(f"Missing keys in response: {list(data.keys())}")
         except Exception as e:
             log(site_id, "generate-proposals", "generate_meta", "error", error=str(e), page_id=page["id"])
             continue

@@ -1,6 +1,8 @@
 """Applies approved meta/schema proposals to WordPress sites."""
 import os, requests, base64
+from datetime import datetime, timezone
 from supabase_client import get_db, log
+from deepseek_client import complete
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,13 +26,14 @@ def apply_approved_meta(site_id: str):
     _validate_site(site)
 
     proposals = (db.table("meta_proposals")
-        .select("*, pages(id, post_id, url, site_id)")
+        .select("*, pages!inner(id, post_id, url, site_id)")
         .eq("status", "approved")
+        .eq("pages.site_id", site_id)
         .execute().data)
 
     for p in proposals:
         page = p["pages"]
-        if page["site_id"] != site_id:
+        if page is None:
             continue
         post_id = page["post_id"]
         if not post_id:
@@ -55,12 +58,13 @@ def apply_approved_meta(site_id: str):
         )
 
         if r.ok:
+            now = datetime.now(timezone.utc).isoformat()
             db.table("meta_proposals").update({
-                "status": "applied", "applied_at": "now()"
+                "status": "applied", "applied_at": now
             }).eq("id", p["id"]).execute()
             db.table("pages").update({
                 "title_current": title, "meta_desc_current": desc,
-                "last_meta_changed_at": "now()"
+                "last_meta_changed_at": now
             }).eq("url", page["url"]).execute()
             log(site_id, "apply-approved", "write_meta", "success", response=r.json())
         else:
@@ -79,7 +83,6 @@ def apply_safe_routines(site_id: str):
         for page in pages:
             if not page.get("post_id"):
                 continue
-            from deepseek_client import complete
             prompt = f"Write a compelling 150-160 character meta description for this page:\nURL: {page['url']}\nTitle: {page.get('title_current','')}\nH1: {page.get('h1_current','')}\n\nReturn only the meta description text, nothing else."
             meta_desc = complete(prompt)[:160]
 
@@ -93,6 +96,8 @@ def apply_safe_routines(site_id: str):
             if r.ok:
                 db.table("pages").update({"meta_desc_current": meta_desc, "has_empty_meta": False}).eq("id", page["id"]).execute()
                 log(site_id, "apply-safe-routines", "write_meta", "success")
+            else:
+                log(site_id, "apply-safe-routines", "write_meta", "error", error=r.text)
 
 def run(site_id: str):
     apply_safe_routines(site_id)
