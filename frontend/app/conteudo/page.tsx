@@ -1,11 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { useSiteId } from '@/lib/SiteContext'
 
 export default function Conteudo() {
   const [briefings, setBriefings] = useState<any[]>([])
   const [loading, setLoading]     = useState(true)
-  const siteId = process.env.NEXT_PUBLIC_DEFAULT_SITE_ID || ''
+  const siteId = useSiteId()
 
   useEffect(() => {
     const path = siteId ? `/api/briefings?site_id=${siteId}` : '/api/briefings'

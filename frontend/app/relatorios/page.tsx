@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { useSiteId } from '@/lib/SiteContext'
 
 export default function Relatorios() {
   const [reports, setReports] = useState<any[]>([])
   const [selected, setSelected] = useState<any>(null)
   const [loading, setLoading]   = useState(true)
-  const siteId = process.env.NEXT_PUBLIC_DEFAULT_SITE_ID || ''
+  const siteId = useSiteId()
 
   useEffect(() => {
     const path = siteId ? `/api/reports?site_id=${siteId}&limit=12` : '/api/reports?limit=12'

@@ -2,11 +2,12 @@
 import { useEffect, useState } from 'react'
 import { AlertBadge } from '@/components/AlertBadge'
 import { api } from '@/lib/api'
+import { useSiteId } from '@/lib/SiteContext'
 
 export default function Alertas() {
   const [alerts, setAlerts]   = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const siteId = process.env.NEXT_PUBLIC_DEFAULT_SITE_ID || ''
+  const siteId = useSiteId()
 
   useEffect(() => {
     const path = siteId ? `/api/alerts?site_id=${siteId}` : '/api/alerts'

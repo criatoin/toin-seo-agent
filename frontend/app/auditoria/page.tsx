@@ -2,13 +2,14 @@
 import { useEffect, useState } from 'react'
 import { AuditChecklist } from '@/components/AuditChecklist'
 import { api } from '@/lib/api'
+import { useSiteId } from '@/lib/SiteContext'
 
 export default function Auditoria() {
   const [issues, setIssues]     = useState<any[]>([])
   const [loading, setLoading]   = useState(true)
   const [running, setRunning]   = useState(false)
   const [status, setStatus]     = useState('')
-  const siteId = process.env.NEXT_PUBLIC_DEFAULT_SITE_ID || ''
+  const siteId = useSiteId()
 
   function loadIssues() {
     if (!siteId) { setLoading(false); return }

@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { Sidebar } from './Sidebar'
+import { SiteProvider } from '@/lib/SiteContext'
+import { SiteSelector } from './SiteSelector'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router   = useRouter()
@@ -22,13 +24,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname])
 
   if (!ready) return null
-
   if (pathname === '/login') return <>{children}</>
 
   return (
-    <div className="flex">
-      <Sidebar />
-      <main className="flex-1 ml-64 p-8">{children}</main>
-    </div>
+    <SiteProvider>
+      <div className="flex">
+        <Sidebar />
+        <div className="flex-1 ml-64 flex flex-col min-h-screen">
+          <header className="h-12 border-b border-gray-800 flex items-center justify-end px-8 bg-gray-950">
+            <SiteSelector />
+          </header>
+          <main className="flex-1 p-8">{children}</main>
+        </div>
+      </div>
+    </SiteProvider>
   )
 }
