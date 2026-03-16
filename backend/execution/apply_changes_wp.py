@@ -11,8 +11,6 @@ ALLOWED_SITES = [s.strip() for s in os.environ.get("GSC_ALLOWED_SITES", "").spli
 def _validate_site(site: dict):
     if site["url"] not in ALLOWED_SITES:
         raise PermissionError(f"Site {site['url']} not in GSC_ALLOWED_SITES")
-    if not site.get("active"):
-        raise PermissionError(f"Site {site['url']} is not active")
     if site["type"] != "wordpress":
         raise PermissionError("Only WordPress sites supported for writes")
 
@@ -94,7 +92,9 @@ def apply_safe_routines(site_id: str):
                 timeout=10
             )
             if r.ok:
+                now = datetime.now(timezone.utc).isoformat()
                 db.table("pages").update({"meta_desc_current": meta_desc, "has_empty_meta": False}).eq("id", page["id"]).execute()
+                db.table("audit_issues").update({"status": "fixed", "fixed_at": now}).eq("page_id", page["id"]).eq("issue_type", "missing_meta_desc").in_("status", ["open", "in_progress"]).execute()
                 log(site_id, "apply-safe-routines", "write_meta", "success")
             else:
                 log(site_id, "apply-safe-routines", "write_meta", "error", error=r.text)

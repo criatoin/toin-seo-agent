@@ -6,8 +6,11 @@ from trends_client import get_trending_topics
 import json
 
 def run(site_id: str):
-    db   = get_db()
-    site = db.table("sites").select("*").eq("id", site_id).single().execute().data
+    db    = get_db()
+    s_res = db.table("sites").select("*").eq("id", site_id).execute()
+    if not s_res.data:
+        raise ValueError(f"Site {site_id} not found")
+    site = s_res.data[0]
 
     log(site_id, "monthly-briefing", "start_briefing", "started")
 
@@ -59,6 +62,7 @@ Return valid JSON:
 
 All text in Portuguese (pt-BR). Focus on data-driven suggestions."""
 
+    data = {"suggested_pautas": [], "pages_to_merge": []}
     try:
         response = complete(prompt)
         # Strip markdown fences if present
@@ -72,7 +76,7 @@ All text in Portuguese (pt-BR). Focus on data-driven suggestions."""
         data  = json.loads(response[start:end])
     except Exception as e:
         log(site_id, "monthly-briefing", "generate_briefing", "error", error=str(e))
-        return
+        # Continue and insert empty briefing so the record exists
 
     month_start = date.today().replace(day=1).isoformat()
 

@@ -24,10 +24,26 @@ export default function Relatorios() {
 
   async function generateReport() {
     setGenerating(true)
-    setStatus('Gerando relatório mensal...')
+    setStatus('Gerando relatório mensal com IA...')
+    const prevCount = reports.length
     try {
       await api.post('/api/jobs/generate-report', { site_id: siteId })
-      setStatus('Geração iniciada em background. Atualize em ~1 minuto.')
+      // Poll until a new record appears (up to 90s)
+      let attempts = 0
+      const timer = setInterval(async () => {
+        attempts++
+        try {
+          const data: any[] = await api.get(`/api/reports?site_id=${siteId}&limit=12`)
+          if (data.length > prevCount) {
+            setReports(data)
+            setSelected(data[0])
+            setStatus('✅ Relatório gerado!')
+            clearInterval(timer)
+            return
+          }
+        } catch { /* ignore polling errors */ }
+        if (attempts >= 18) { clearInterval(timer); setStatus('Pronto. Clique em "Atualizar" para ver.') }
+      }, 5000)
     } catch (e: any) {
       setStatus('Erro: ' + (e?.message || 'verifique os logs'))
     } finally {

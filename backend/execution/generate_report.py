@@ -4,8 +4,11 @@ from supabase_client import get_db, log
 from deepseek_client import complete
 
 def run(site_id: str):
-    db   = get_db()
-    site = db.table("sites").select("*").eq("id", site_id).single().execute().data
+    db    = get_db()
+    s_res = db.table("sites").select("*").eq("id", site_id).execute()
+    if not s_res.data:
+        raise ValueError(f"Site {site_id} not found")
+    site = s_res.data[0]
 
     log(site_id, "generate-report", "start_report", "started")
 

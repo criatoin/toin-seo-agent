@@ -21,10 +21,25 @@ export default function Conteudo() {
 
   async function generateBriefing() {
     setGenerating(true)
-    setStatus('Gerando briefing de conteúdo...')
+    setStatus('Gerando briefing de conteúdo com IA...')
+    const prevCount = briefings.length
     try {
       await api.post('/api/jobs/monthly-briefing', { site_id: siteId })
-      setStatus('Geração iniciada em background. Atualize em ~1 minuto.')
+      // Poll until a new record appears (up to 90s)
+      let attempts = 0
+      const timer = setInterval(async () => {
+        attempts++
+        try {
+          const data: any[] = await api.get(`/api/briefings?site_id=${siteId}`)
+          if (data.length > prevCount) {
+            setBriefings(data)
+            setStatus('✅ Briefing gerado!')
+            clearInterval(timer)
+            return
+          }
+        } catch { /* ignore polling errors */ }
+        if (attempts >= 18) { clearInterval(timer); setStatus('Pronto. Clique em "Atualizar" para ver.') }
+      }, 5000)
     } catch (e: any) {
       setStatus('Erro: ' + (e?.message || 'verifique os logs'))
     } finally {
