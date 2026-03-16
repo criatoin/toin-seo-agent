@@ -4,25 +4,64 @@ import { api } from '@/lib/api'
 import { useSiteId } from '@/lib/SiteContext'
 
 export default function Relatorios() {
-  const [reports, setReports] = useState<any[]>([])
+  const [reports, setReports]   = useState<any[]>([])
   const [selected, setSelected] = useState<any>(null)
   const [loading, setLoading]   = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [status, setStatus]     = useState('')
   const siteId = useSiteId()
 
-  useEffect(() => {
-    const path = siteId ? `/api/reports?site_id=${siteId}&limit=12` : '/api/reports?limit=12'
-    api.get(path).then(setReports).catch(() => setReports([])).finally(() => setLoading(false))
-  }, [siteId])
+  function loadReports() {
+    if (!siteId) { setLoading(false); return }
+    setLoading(true)
+    api.get(`/api/reports?site_id=${siteId}&limit=12`)
+      .then((data: any[]) => { setReports(data); if (data.length > 0) setSelected(data[0]) })
+      .catch(() => setReports([]))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { loadReports() }, [siteId])
+
+  async function generateReport() {
+    setGenerating(true)
+    setStatus('Gerando relatório mensal...')
+    try {
+      await api.post('/api/jobs/generate-report', { site_id: siteId })
+      setStatus('Geração iniciada em background. Atualize em ~1 minuto.')
+    } catch (e: any) {
+      setStatus('Erro: ' + (e?.message || 'verifique os logs'))
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-gray-800 pb-4">
-        <h2 className="text-xl font-semibold text-white">Relatórios Mensais</h2>
+      <div className="flex items-center justify-between border-b border-gray-800 pb-4">
+        <div>
+          <h2 className="text-xl font-semibold text-white">Relatórios Mensais</h2>
+        </div>
+        {siteId && (
+          <div className="flex items-center gap-3">
+            {status && <p className="text-xs text-indigo-400 max-w-xs text-right">{status}</p>}
+            <button onClick={generateReport} disabled={generating}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-500 disabled:opacity-50">
+              {generating ? 'Gerando...' : 'Gerar Relatório Agora'}
+            </button>
+            <button onClick={loadReports} disabled={loading}
+              className="px-3 py-2 bg-gray-700 text-white rounded-lg text-sm hover:bg-gray-600 disabled:opacity-50">
+              Atualizar
+            </button>
+          </div>
+        )}
       </div>
       {loading ? (
         <p className="text-gray-500 text-sm">Carregando...</p>
       ) : reports.length === 0 ? (
-        <p className="text-gray-500 text-sm">Nenhum relatório gerado ainda.</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <p className="text-sm text-gray-400">Nenhum relatório gerado ainda.</p>
+          <p className="text-xs text-gray-500 mt-2">Os relatórios são gerados automaticamente no dia 1 de cada mês, ou você pode gerar manualmente.</p>
+        </div>
       ) : (
         <div className="flex gap-6">
           <div className="w-48 shrink-0 space-y-2">
