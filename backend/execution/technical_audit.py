@@ -27,8 +27,9 @@ def run(site_id: str):
 
     log(site_id, "technical-audit", "start_audit", "started")
 
-    # Clear old open issues only — preserve manager-actioned records
+    # Clear stale pages and open issues — fresh crawl every time
     db.table("audit_issues").delete().eq("site_id", site_id).eq("status", "open").execute()
+    db.table("pages").delete().eq("site_id", site_id).execute()
 
     urls = crawl_sitemap(site["url"])
     if not urls:
