@@ -7,9 +7,13 @@ from database import get_db
 from auth import require_user
 
 router = APIRouter()
+# openid is added automatically by Google when requesting userinfo.email;
+# include it here so oauthlib doesn't raise a scope-mismatch warning.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 SCOPES = [
-    "https://www.googleapis.com/auth/webmasters.readonly",
+    "openid",
     "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/webmasters.readonly",
 ]
 
 
