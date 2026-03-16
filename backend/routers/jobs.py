@@ -5,8 +5,8 @@ from auth import require_cron_or_user, require_cron
 
 router = APIRouter()
 
-# Add execution/ directory to path so scripts can be imported
-_exec_path = os.path.join(os.path.dirname(__file__), '..', '..', 'execution')
+# execution/ is copied into /app/execution/ by Dockerfile (built from repo root)
+_exec_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
 if _exec_path not in sys.path:
     sys.path.insert(0, _exec_path)
 

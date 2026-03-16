@@ -18,7 +18,8 @@ from apscheduler.triggers.cron import CronTrigger
 logger = logging.getLogger("scheduler")
 
 # Execution scripts directory
-_exec_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
+# execution/ lives at backend/execution/ in the repo -> /app/execution/ in the container
+_exec_path = os.path.join(os.path.dirname(__file__), 'execution')
 if _exec_path not in sys.path:
     sys.path.insert(0, _exec_path)
 
