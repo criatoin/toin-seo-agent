@@ -13,3 +13,4 @@ python-multipart==0.0.12
 beautifulsoup4==4.12.3
 pytrends==4.9.2
 google-api-python-client==2.149.0
+apscheduler==3.10.4
