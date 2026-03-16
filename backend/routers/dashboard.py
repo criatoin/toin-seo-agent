@@ -55,27 +55,31 @@ async def get_dashboard(site_id: str, user=Depends(require_user)):
         .data
     )
 
-    # Pending proposals (count only, filtered by pages belonging to this site)
-    page_id_rows = db.table("pages").select("id").eq("site_id", site_id).execute().data
-    page_ids = [r["id"] for r in page_id_rows]
+    # Pending proposals — join through pages to filter by site_id
+    # Use embedded resource filtering to avoid large IN() URLs
+    try:
+        pending_meta = (
+            db.table("meta_proposals")
+            .select("id, pages!inner(site_id)")
+            .eq("status", "pending")
+            .eq("pages.site_id", site_id)
+            .execute()
+            .data
+        )
+    except Exception:
+        pending_meta = []
 
-    pending_meta = (
-        db.table("meta_proposals")
-        .select("id")
-        .eq("status", "pending")
-        .in_("page_id", page_ids)
-        .execute()
-        .data
-    ) if page_ids else []
-
-    pending_schema = (
-        db.table("schema_proposals")
-        .select("id")
-        .eq("status", "pending")
-        .in_("page_id", page_ids)
-        .execute()
-        .data
-    ) if page_ids else []
+    try:
+        pending_schema = (
+            db.table("schema_proposals")
+            .select("id, pages!inner(site_id)")
+            .eq("status", "pending")
+            .eq("pages.site_id", site_id)
+            .execute()
+            .data
+        )
+    except Exception:
+        pending_schema = []
 
     # Latest briefing
     briefing = (
