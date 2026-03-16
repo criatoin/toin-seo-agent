@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "${SUPABASE_ACCESS_TOKEN}",
+        "--project-id",
+        "${SUPABASE_PROJECT_ID}"
+      ]
+    },
+    "gsc": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@aminforou/mcp-gsc"
+      ],
+      "env": {
+        "GSC_CLIENT_ID": "${GSC_CLIENT_ID}",
+        "GSC_CLIENT_SECRET": "${GSC_CLIENT_SECRET}",
+        "GSC_REFRESH_TOKEN": "${GSC_REFRESH_TOKEN}"
+      }
+    }
+  }
+}
