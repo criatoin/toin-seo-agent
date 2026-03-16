@@ -56,8 +56,6 @@ async def get_dashboard(site_id: str, user=Depends(require_user)):
     )
 
     # Pending proposals (count only, filtered by pages belonging to this site)
-    page_ids = [p["gsc_impressions"] for p in db.table("pages").select("id").eq("site_id", site_id).execute().data]
-    # Re-fetch just IDs
     page_id_rows = db.table("pages").select("id").eq("site_id", site_id).execute().data
     page_ids = [r["id"] for r in page_id_rows]
 
