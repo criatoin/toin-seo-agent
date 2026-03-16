@@ -78,7 +78,9 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
         raise HTTPException(404, "Page not found")
     page = page_res.data[0]
 
+    import asyncio, functools
     from deepseek_client import complete
+
     prompt = (
         f"Escreva uma meta description atraente de 150-160 caracteres em português (pt-BR) para esta página:\n"
         f"URL: {page['url']}\n"
@@ -86,8 +88,29 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
         f"H1: {page.get('h1_current', '')}\n\n"
         f"Retorne apenas o texto da meta description, sem aspas, sem explicações."
     )
-    suggestion = complete(prompt, max_tokens=200).strip().strip('"').strip("'")[:160]
-    return {"suggestion": suggestion, "page_id": page["id"], "url": page["url"]}
+
+    # Run blocking I/O in a thread so the event loop stays free
+    try:
+        loop = asyncio.get_event_loop()
+        raw = await loop.run_in_executor(
+            None, functools.partial(complete, prompt, max_tokens=200)
+        )
+        suggestion = raw.strip().strip('"').strip("'")[:160]
+    except Exception as e:
+        # Fallback: generate a basic suggestion from title/H1 without AI
+        title = page.get('title_current', '') or page.get('url', '')
+        h1    = page.get('h1_current', '')
+        base  = h1 or title
+        fallback = f"Conheça {base}. Acesse e veja tudo sobre este conteúdo em nosso site."
+        return {
+            "suggestion": fallback[:160],
+            "page_id": page["id"],
+            "url": page["url"],
+            "ai_error": str(e),
+            "is_fallback": True,
+        }
+
+    return {"suggestion": suggestion, "page_id": page["id"], "url": page["url"], "is_fallback": False}
 
 
 class ApplyFixBody(BaseModel):

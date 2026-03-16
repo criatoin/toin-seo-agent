@@ -26,41 +26,97 @@ const SEVERITY_TEXT: Record<string, string> = {
   critical: 'text-red-400', important: 'text-yellow-400', improvement: 'text-blue-400',
 }
 
-// Actionable guidance for speed/CWV issues
-const LCP_GUIDANCE = [
-  '📷 Otimize a imagem principal: converta para WebP e adicione atributo `loading="eager"` e `fetchpriority="high"`',
-  '🔤 Verifique se o maior elemento visível é texto ou imagem — se for imagem, pré-carregue com `<link rel="preload">`',
-  '🐢 Reduza o TTFB: ative cache de página (ex: WP Super Cache / LiteSpeed Cache) e use um CDN (Cloudflare grátis)',
-  '🚫 Remova ou adie scripts de terceiros que bloqueiam a renderização (Google Tag Manager, chat widgets)',
-  '🗜️ Ative compressão Gzip/Brotli no servidor',
-  '📊 Veja o relatório detalhado no PageSpeed Insights para esta URL específica',
+// Orientação personalizada para o stack real do site:
+// Cloudflare CDN + LiteSpeed Server + Elementor + AIOSEO
+// Cache-Control: max-age=0 (sem cache configurado) — principal problema de TTFB
+const LCP_GUIDANCE: { label: string; detail: string; priority: 'alta' | 'média' }[] = [
+  {
+    priority: 'alta',
+    label: 'Instale o plugin LiteSpeed Cache (gratuito)',
+    detail: 'Seu servidor já é LiteSpeed — instale o plugin "LiteSpeed Cache" no WordPress. Vá em LiteSpeed Cache → Cache → ative "Enable Cache". Isso sozinho pode reduzir o TTFB de >1s para <200ms.',
+  },
+  {
+    priority: 'alta',
+    label: 'Ative o cache de página no Cloudflare',
+    detail: 'Você já tem Cloudflare. Vá em Cloudflare → seu site → Caching → Configuration → mude "Caching Level" para "Standard". Depois vá em Page Rules e crie uma regra: criatoin.com.br/* → Cache Level: Cache Everything.',
+  },
+  {
+    priority: 'alta',
+    label: 'Otimize imagens com o LiteSpeed Cache',
+    detail: 'No LiteSpeed Cache → Image Optimization → ative "Auto Request Cron" e "WebP Replacement". Isso converte automaticamente suas imagens para WebP (30-50% menor), reduzindo o tempo de carregamento do maior elemento visível.',
+  },
+  {
+    priority: 'média',
+    label: 'Reduza o JavaScript do Elementor',
+    detail: 'O Elementor carrega muitos scripts. No LiteSpeed Cache → Page Optimization → JS Settings → ative "Load JS Deferred". Isso adia scripts não-críticos e libera o carregamento principal da página.',
+  },
+  {
+    priority: 'média',
+    label: 'Adie o banner de cookies (Cookie Law Info)',
+    detail: 'O plugin "Cookie Law Info" carrega scripts no início da página. No LiteSpeed Cache → Page Optimization → JS Excludes, adicione o JS do cookie banner para ser carregado por último.',
+  },
+  {
+    priority: 'média',
+    label: 'Ative minificação de CSS/JS',
+    detail: 'No LiteSpeed Cache → Page Optimization → ative "Minify CSS" e "Combine CSS". Isso reduz o número de requisições e o tamanho dos arquivos.',
+  },
 ]
 
-const CLS_GUIDANCE = [
-  '📐 Defina width e height explícitos em todas as tags `<img>` e `<video>` para reservar espaço',
-  '🔤 Use `font-display: swap` para evitar que fontes customizadas causem deslocamento de layout',
-  '📢 Reserve espaço para banners e anúncios — evite inserir conteúdo acima do conteúdo existente',
-  '⏳ Não injete conteúdo dinâmico acima do fold após o carregamento',
+const CLS_GUIDANCE: { label: string; detail: string; priority: 'alta' | 'média' }[] = [
+  {
+    priority: 'alta',
+    label: 'Defina dimensões em imagens do Elementor',
+    detail: 'No Elementor, cada imagem deve ter largura e altura definidas na seção "Advanced → Custom CSS" ou via propriedades do widget. Adicione `aspect-ratio: 16/9` (ou a proporção correta) no CSS da imagem para reservar o espaço antes de carregar.',
+  },
+  {
+    priority: 'alta',
+    label: 'Use fonte do sistema ou pré-carregue Google Fonts',
+    detail: 'Fontes externas causam CLS. Em Elementor → Site Settings → Custom Fonts, troque por uma fonte do sistema (como Inter, system-ui). Ou adicione `<link rel="preload">` para as fontes no cabeçalho.',
+  },
+  {
+    priority: 'média',
+    label: 'Reserve espaço para o banner de cookies',
+    detail: 'O plugin Cookie Law Info insere um banner no rodapé ou topo após o carregamento, causando deslocamento. Adicione no CSS: `.cookie-banner { position: fixed; bottom: 0; }` para que não empurre o conteúdo.',
+  },
 ]
 
-const INP_GUIDANCE = [
-  '⚡ Divida tarefas JavaScript longas em pedaços menores com `setTimeout` ou `scheduler.yield()`',
-  '🖱️ Evite handlers de eventos pesados no scroll e no click — use debounce',
-  '📦 Reduza o tamanho do bundle JS: elimine bibliotecas não usadas',
-  '🔄 Prefira Web Workers para processamento pesado fora da main thread',
+const INP_GUIDANCE: { label: string; detail: string; priority: 'alta' | 'média' }[] = [
+  {
+    priority: 'alta',
+    label: 'Ative "Load JS Deferred" no LiteSpeed Cache',
+    detail: 'No LiteSpeed Cache → Page Optimization → JS Settings → ative "Load JS Deferred". O Elementor carrega muito JavaScript — adiar scripts não essenciais melhora drasticamente a responsividade.',
+  },
+  {
+    priority: 'alta',
+    label: 'Desative widgets do Elementor não usados',
+    detail: 'No Elementor → Elements Manager (no menu do admin), desative todos os widgets que não usa. Cada widget ativo carrega JavaScript na página, mesmo que não esteja sendo usado.',
+  },
+  {
+    priority: 'média',
+    label: 'Remova ou substitua ht-mega-for-elementor',
+    detail: 'O plugin "ht-mega-for-elementor" adiciona dezenas de widgets extras ao Elementor com muito JS. Se você não usa todos os recursos, considere removê-lo. Ele pode ser responsável por 30-40% do JavaScript extra.',
+  },
 ]
+
+const PRIORITY_COLOR = { alta: 'text-red-400', média: 'text-yellow-400' }
 
 function SpeedGuidance({ issue_type }: { issue_type: string }) {
   const metric = issue_type.split('_')[0]
   const guidance = metric === 'lcp' ? LCP_GUIDANCE : metric === 'cls' ? CLS_GUIDANCE : INP_GUIDANCE
   return (
-    <div className="mt-3 p-3 bg-gray-800/60 rounded-lg border border-gray-700">
-      <p className="text-xs font-medium text-gray-300 mb-2">Como resolver:</p>
-      <ul className="space-y-1.5">
-        {guidance.map((step, i) => (
-          <li key={i} className="text-xs text-gray-400 leading-relaxed">{step}</li>
-        ))}
-      </ul>
+    <div className="mt-3 p-3 bg-gray-800/60 rounded-lg border border-gray-700 space-y-3">
+      <p className="text-xs font-medium text-gray-300">Soluções para o seu site (Cloudflare + LiteSpeed + Elementor):</p>
+      {guidance.map((step, i) => (
+        <div key={i} className="border border-gray-700 rounded p-2.5">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`text-xs font-semibold uppercase tracking-wider ${PRIORITY_COLOR[step.priority]}`}>
+              {step.priority}
+            </span>
+            <span className="text-xs font-medium text-white">{step.label}</span>
+          </div>
+          <p className="text-xs text-gray-400 leading-relaxed">{step.detail}</p>
+        </div>
+      ))}
     </div>
   )
 }
@@ -75,6 +131,7 @@ function IssueCard({
 }) {
   const [loading, setLoading]       = useState(false)
   const [preview, setPreview]       = useState<string | null>(null)
+  const [isFallback, setIsFallback] = useState(false)
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [applying, setApplying]     = useState(false)
   const [editedPreview, setEditedPreview] = useState('')
@@ -106,6 +163,7 @@ function IssueCard({
       )
       setPreview(res.suggestion)
       setEditedPreview(res.suggestion)
+      setIsFallback(!!res.is_fallback)
     } catch (e: any) {
       alert('Erro ao gerar sugestão: ' + (e?.message || 'tente novamente'))
     } finally {
@@ -155,7 +213,11 @@ function IssueCard({
           {/* Meta preview inline */}
           {preview !== null && !isActioned && (
             <div className="mt-3 p-3 bg-gray-800/60 rounded-lg border border-gray-600 space-y-2">
-              <p className="text-xs font-medium text-gray-300">Sugestão gerada pela IA:</p>
+              {isFallback ? (
+                <p className="text-xs text-yellow-400">⚠️ IA indisponível — sugestão automática gerada sem AI. Edite antes de aplicar.</p>
+              ) : (
+                <p className="text-xs font-medium text-gray-300">Sugestão gerada pela IA:</p>
+              )}
               <textarea
                 value={editedPreview}
                 onChange={e => setEditedPreview(e.target.value)}
