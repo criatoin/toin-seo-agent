@@ -2,7 +2,7 @@ import { AlertBadge } from '@/components/AlertBadge'
 import { GscMetrics } from '@/components/GscMetrics'
 
 export default function Dashboard() {
-  const siteId = process.env.DEFAULT_SITE_ID || ''
+  const siteId = process.env.NEXT_PUBLIC_DEFAULT_SITE_ID || ''
 
   return (
     <div className="space-y-6">

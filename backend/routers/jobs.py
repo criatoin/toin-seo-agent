@@ -18,6 +18,11 @@ def _run_job(module_name: str, site_id: str):
     mod = importlib.import_module(module_name)
     mod.run(site_id)
 
+def _run_job_fn(module_name: str, fn_name: str, site_id: str):
+    import importlib
+    mod = importlib.import_module(module_name)
+    getattr(mod, fn_name)(site_id)
+
 @router.post("/technical-audit")
 async def job_technical_audit(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron_or_user)):
     bg.add_task(_run_job, "technical_audit", body.site_id)
@@ -45,12 +50,12 @@ async def job_monthly_briefing(body: JobBody, bg: BackgroundTasks, auth=Depends(
 
 @router.post("/apply-safe-routines")
 async def job_apply_safe(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
-    bg.add_task(_run_job, "apply_changes_wp", body.site_id)
+    bg.add_task(_run_job_fn, "apply_changes_wp", "apply_safe_routines", body.site_id)
     return {"queued": "apply-safe-routines", "site_id": body.site_id}
 
 @router.post("/apply-approved")
 async def job_apply_approved(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron)):
-    bg.add_task(_run_job, "apply_changes_wp", body.site_id)
+    bg.add_task(_run_job_fn, "apply_changes_wp", "apply_approved_meta", body.site_id)
     return {"queued": "apply-approved", "site_id": body.site_id}
 
 @router.post("/generate-report")
