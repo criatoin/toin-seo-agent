@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
 from database import get_db
-from auth import require_user
+from auth import require_user, require_cron_or_user
 
 router = APIRouter()
 SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
+
 
 def _get_flow() -> Flow:
     api_url = os.environ.get("NEXT_PUBLIC_API_URL", "").rstrip("/")
@@ -14,23 +15,36 @@ def _get_flow() -> Flow:
         "web": {
             "client_id":     os.environ["GSC_CLIENT_ID"],
             "client_secret": os.environ["GSC_CLIENT_SECRET"],
-            "redirect_uris": [f"{api_url}/gsc/callback"],
+            "redirect_uris": [f"{api_url}/api/gsc/callback"],
             "auth_uri":      "https://accounts.google.com/o/oauth2/auth",
             "token_uri":     "https://oauth2.googleapis.com/token",
         }
     }
     return Flow.from_client_config(
         client_config, scopes=SCOPES,
-        redirect_uri=f"{api_url}/gsc/callback"
+        redirect_uri=f"{api_url}/api/gsc/callback"
     )
+
+
+@router.get("/auth-url")
+async def gsc_auth_url(user=Depends(require_user)):
+    """Return the Google OAuth URL — frontend redirects the browser there."""
+    if not os.environ.get("GSC_CLIENT_ID"):
+        raise HTTPException(400, "GSC_CLIENT_ID not configured")
+    flow = _get_flow()
+    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+    return {"url": auth_url}
+
 
 @router.get("/connect")
 async def gsc_connect(user=Depends(require_user)):
+    """Legacy direct-redirect endpoint (requires auth header — use /auth-url instead)."""
     if not os.environ.get("GSC_CLIENT_ID"):
         raise HTTPException(400, "GSC_CLIENT_ID not configured")
     flow = _get_flow()
     auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
     return RedirectResponse(auth_url)
+
 
 @router.get("/callback")
 async def gsc_callback(request: Request):
@@ -58,6 +72,7 @@ async def gsc_callback(request: Request):
     panel_url = os.environ.get("PANEL_URL", "")
     return RedirectResponse(f"{panel_url}/configuracoes?gsc=connected")
 
+
 @router.get("/status")
 async def gsc_status(user=Depends(require_user)):
     db = get_db()
@@ -65,6 +80,7 @@ async def gsc_status(user=Depends(require_user)):
     if not result.data:
         return {"connected": False}
     return {"connected": True, **result.data[0]}
+
 
 @router.delete("/disconnect")
 async def gsc_disconnect(user=Depends(require_user)):

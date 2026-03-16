@@ -9,8 +9,13 @@ export default function Configuracoes() {
     api.get('/api/gsc/status').then(setGscStatus).catch(() => {})
   }, [])
 
-  function connectGsc() {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/gsc/connect`
+  async function connectGsc() {
+    try {
+      const { url } = await api.get('/api/gsc/auth-url')
+      window.location.href = url
+    } catch {
+      alert('Erro ao iniciar conexão com Google. Verifique as credenciais OAuth.')
+    }
   }
 
   return (
@@ -22,10 +27,10 @@ export default function Configuracoes() {
         {gscStatus?.connected ? (
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-green-400">✅ Conectado</p>
+              <p className="text-sm text-green-400">Conectado</p>
               <p className="text-xs text-gray-500 mt-1">{gscStatus.google_email}</p>
             </div>
-            <button onClick={() => api.delete('/api/gsc/disconnect').then(() => setGscStatus(null))}
+            <button onClick={() => api.delete('/api/gsc/disconnect').then(() => setGscStatus({ connected: false }))}
               className="text-xs text-red-400 hover:text-red-300">
               Desconectar
             </button>
@@ -41,6 +46,16 @@ export default function Configuracoes() {
             </button>
           </div>
         )}
+      </section>
+
+      <section className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <h3 className="font-medium text-white mb-2">Callback OAuth GSC</h3>
+        <p className="text-xs text-gray-500 mb-2">
+          Adicione esta URL como redirect URI no Google Cloud Console:
+        </p>
+        <code className="text-xs text-indigo-400 bg-gray-800 px-3 py-2 rounded block">
+          {process.env.NEXT_PUBLIC_API_URL}/api/gsc/callback
+        </code>
       </section>
     </div>
   )
