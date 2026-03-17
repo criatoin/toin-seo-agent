@@ -82,49 +82,75 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
 
     import asyncio, functools
     from deepseek_client import complete
+    from bs4 import BeautifulSoup
 
-    # Build context from available data
-    site_name = site.get("name", "")
-    site_url  = site.get("url", "")
+    def _fetch_page_text(url: str) -> str:
+        """Fetch page and extract readable text (headings + first paragraphs)."""
+        try:
+            r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0 (SEO-Agent/1.0)"})
+            if not r.ok:
+                return ""
+            soup = BeautifulSoup(r.text, "html.parser")
+            # Remove noise
+            for tag in soup(["script", "style", "nav", "header", "footer",
+                              "aside", "form", "noscript", "iframe"]):
+                tag.decompose()
+            # Collect headings and paragraphs
+            chunks = []
+            for tag in soup.find_all(["h1", "h2", "h3", "p"]):
+                text = tag.get_text(" ", strip=True)
+                if len(text) > 20:
+                    chunks.append(text)
+                if sum(len(c) for c in chunks) > 800:
+                    break
+            return " | ".join(chunks)[:900]
+        except Exception:
+            return ""
+
+    site_name   = site.get("name", "")
     top_queries = page.get("gsc_top_queries") or []
     queries_str = ""
-    if top_queries:
-        if isinstance(top_queries, list):
-            queries_str = ", ".join(
-                q.get("query", q) if isinstance(q, dict) else str(q)
-                for q in top_queries[:5]
-            )
-        queries_str = f"\nPrincipais buscas que chegam nesta página: {queries_str}"
+    if top_queries and isinstance(top_queries, list):
+        qs = [q.get("query", q) if isinstance(q, dict) else str(q) for q in top_queries[:5]]
+        queries_str = f"\nPalavras-chave que usuários usam para chegar nesta página: {', '.join(qs)}"
+
+    # Fetch live content in executor so we don't block the event loop
+    loop = asyncio.get_event_loop()
+    page_text = await loop.run_in_executor(None, _fetch_page_text, page["url"])
+
+    content_block = f"\nConteúdo extraído da página:\n{page_text}" if page_text else ""
 
     prompt = (
-        f"Você é um especialista em SEO. Escreva uma meta description precisa e informativa "
-        f"de 140-160 caracteres em português (pt-BR) para a página abaixo.\n\n"
-        f"Regras:\n"
-        f"- Descreva o conteúdo real da página, sem exageros promocionais\n"
-        f"- Use linguagem clara e direta, focada no que o usuário vai encontrar\n"
-        f"- Inclua a palavra-chave principal naturalmente, se possível\n"
-        f"- NÃO use frases genéricas como 'Acesse e veja', 'Conheça nosso'\n\n"
-        f"Site: {site_name} ({site_url})\n"
-        f"URL da página: {page['url']}\n"
+        f"Você é um especialista sênior em SEO com 10 anos de experiência otimizando "
+        f"meta descriptions para máximo CTR orgânico.\n\n"
+        f"Sua tarefa: escrever a meta description ideal para esta página, com 140-160 caracteres.\n\n"
+        f"Diretrizes profissionais:\n"
+        f"1. Descreva EXATAMENTE o que o usuário vai encontrar — sem inventar\n"
+        f"2. Use a palavra-chave principal no início quando possível\n"
+        f"3. Seja específico: números, detalhes e ações concretas geram mais cliques\n"
+        f"4. Tom: direto e informativo — NÃO use linguagem de propaganda\n"
+        f"5. PROIBIDO: 'Conheça', 'Descubra', 'Acesse', 'Veja mais', 'Clique aqui'\n"
+        f"6. PROIBIDO: mencionar o nome da agência/site se não for relevante para o usuário\n"
+        f"7. Escreva em português (pt-BR)\n\n"
+        f"Dados da página:\n"
+        f"Site: {site_name}\n"
+        f"URL: {page['url']}\n"
         f"Título: {page.get('title_current', '')}\n"
         f"H1: {page.get('h1_current', '')}"
-        f"{queries_str}\n\n"
-        f"Retorne apenas o texto da meta description, sem aspas, sem explicações."
+        f"{queries_str}"
+        f"{content_block}\n\n"
+        f"Retorne APENAS o texto da meta description. Sem aspas, sem explicações, sem prefixos."
     )
 
-    # Run blocking I/O in a thread so the event loop stays free
+    # Run AI call in thread
     try:
-        loop = asyncio.get_event_loop()
         raw = await loop.run_in_executor(
             None, functools.partial(complete, prompt, max_tokens=200)
         )
         suggestion = raw.strip().strip('"').strip("'")[:160]
     except Exception as e:
-        # Fallback: generate a basic suggestion from title/H1 without AI
-        title = page.get('title_current', '') or page.get('url', '')
-        h1    = page.get('h1_current', '')
-        base  = h1 or title
-        fallback = f"Conheça {base}. Acesse e veja tudo sobre este conteúdo em nosso site."
+        title = page.get('title_current', '') or page.get('h1_current', '') or page.get('url', '')
+        fallback = f"{title} — veja detalhes, informações e conteúdo completo nesta página."
         return {
             "suggestion": fallback[:160],
             "page_id": page["id"],
