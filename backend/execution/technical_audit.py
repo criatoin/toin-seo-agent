@@ -4,6 +4,9 @@ from supabase_client import get_db, log
 from site_crawler import crawl_sitemap, crawl_page
 from pagespeed_client import analyze
 import requests, base64
+import urllib.robotparser
+import asyncio
+from urllib.parse import urljoin, urlparse
 
 def _wp_get_pages(site: dict) -> list[dict]:
     creds   = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
@@ -19,12 +22,25 @@ def _add_issue(db, site_id, page_id, severity, category, issue_type, description
         "recommendation": recommendation, "auto_fixable": auto_fixable,
     }).execute()
 
+def _check_redirect_chain(url: str) -> list[str]:
+    """Follow redirects and return the chain of URLs. Empty list = no chain."""
+    try:
+        r = requests.get(url, timeout=5, headers={"User-Agent": "TOINSEOBot/1.0"},
+                         allow_redirects=True)
+        if len(r.history) >= 2:
+            return [h.url for h in r.history] + [r.url]
+        return []
+    except Exception:
+        return []
+
+
 def run(site_id: str):
     db   = get_db()
     site = db.table("sites").select("*").eq("id", site_id).single().execute().data
     if not site:
         raise ValueError(f"Site {site_id} not found")
 
+    site_url = site["url"]
     log(site_id, "technical-audit", "start_audit", "started")
 
     # Clear stale pages and open issues — fresh crawl every time
@@ -43,8 +59,10 @@ def run(site_id: str):
     seen_titles = {}
     seen_descs  = {}
 
-    for url in urls[:100]:  # limit to 100 pages per audit
+    crawl_results = []
+    for url in urls[:200]:  # limit to 200 pages per audit
         crawl = crawl_page(url)
+        crawl_results.append(crawl)
         if crawl.get("error") or crawl.get("status_code", 200) not in (200, 301, 302):
             continue
 
@@ -128,6 +146,188 @@ def run(site_id: str):
                 "Crie um llms.txt para melhor visibilidade em AI Overviews", auto_fixable=True)
     except Exception:
         pass
+
+    # ── CHECK 2.1: robots.txt ──────────────────────────────────────────────
+    try:
+        rp = urllib.robotparser.RobotFileParser()
+        rp.set_url(site_url.rstrip("/") + "/robots.txt")
+        rp.read()
+        blocked = [u for u in urls if not rp.can_fetch("*", u)]
+        if blocked:
+            existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "robots_blocking_pages").execute().data
+            if not existing:
+                preview = ", ".join(blocked[:5])
+                db.table("audit_issues").insert({
+                    "site_id": site_id,
+                    "page_id": None,
+                    "severity": "critical",
+                    "category": "indexation",
+                    "issue_type": "robots_blocking_pages",
+                    "description": f"{len(blocked)} páginas bloqueadas pelo robots.txt: {preview}",
+                    "recommendation": "Revise as regras Disallow no robots.txt e remova bloqueios em páginas que devem ser indexadas.",
+                    "auto_fixable": False,
+                }).execute()
+    except Exception as e:
+        log(site_id, "technical-audit", "robots_check", "error", error=str(e))
+
+    # ── CHECK 2.2: Páginas Órfãs ───────────────────────────────────────────
+    try:
+        all_linked: set[str] = set()
+        for crawl in crawl_results:
+            for link in crawl.get("internal_links", []):
+                all_linked.add(link)
+
+        for url in urls:
+            if url not in all_linked:
+                page_res = db.table("pages").select("id").eq("site_id", site_id).eq("url", url).execute()
+                pid = page_res.data[0]["id"] if page_res.data else None
+                existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "orphan_page").eq("page_id", pid).execute().data if pid else []
+                if not existing:
+                    db.table("audit_issues").insert({
+                        "site_id": site_id,
+                        "page_id": pid,
+                        "severity": "important",
+                        "category": "links",
+                        "issue_type": "orphan_page",
+                        "description": f"Página órfã: {url}",
+                        "recommendation": "Adicione pelo menos 1 link interno apontando para esta página a partir de uma página de maior tráfego.",
+                        "auto_fixable": False,
+                    }).execute()
+    except Exception as e:
+        log(site_id, "technical-audit", "orphan_pages_check", "error", error=str(e))
+
+    # ── CHECK 2.3: Links Internos Quebrados ────────────────────────────────
+    try:
+        broken_found: set[str] = set()
+        for crawl in crawl_results:
+            source_url = crawl["url"]
+            for link in crawl.get("internal_links", []):
+                if link in broken_found:
+                    continue
+                try:
+                    hr = requests.head(link, timeout=5, allow_redirects=True,
+                                       headers={"User-Agent": "TOINSEOBot/1.0"})
+                    if hr.status_code == 404:
+                        broken_found.add(link)
+                        src_page = db.table("pages").select("id").eq("site_id", site_id).eq("url", source_url).execute().data
+                        pid = src_page[0]["id"] if src_page else None
+                        db.table("audit_issues").insert({
+                            "site_id": site_id,
+                            "page_id": pid,
+                            "severity": "important",
+                            "category": "links",
+                            "issue_type": "broken_internal_link",
+                            "description": f"Link quebrado: {source_url} → {link} (404)",
+                            "recommendation": f"Remova ou corrija o link para {link} na página {source_url}.",
+                            "auto_fixable": False,
+                        }).execute()
+                except Exception:
+                    pass
+                if len(broken_found) >= 20:
+                    break
+            if len(broken_found) >= 20:
+                break
+    except Exception as e:
+        log(site_id, "technical-audit", "broken_links_check", "error", error=str(e))
+
+    # ── CHECK 2.4: Redirect Chains ─────────────────────────────────────────
+    try:
+        for url in urls[:50]:  # Limita para não exceder timeout
+            chain = _check_redirect_chain(url)
+            if chain:
+                existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "redirect_chain").eq("description", f"Redirect chain: {' → '.join(chain)}").execute().data
+                if not existing:
+                    db.table("audit_issues").insert({
+                        "site_id": site_id,
+                        "page_id": None,
+                        "severity": "important",
+                        "category": "indexation",
+                        "issue_type": "redirect_chain",
+                        "description": f"Redirect chain: {' → '.join(chain)}",
+                        "recommendation": f"Configure redirect direto de {chain[0]} para {chain[-1]}, eliminando os passos intermediários.",
+                        "auto_fixable": False,
+                    }).execute()
+    except Exception as e:
+        log(site_id, "technical-audit", "redirect_chain_check", "error", error=str(e))
+
+    # ── CHECK 2.5: Profundidade de Cliques ─────────────────────────────────
+    try:
+        from collections import deque
+        from site_crawler import normalize_url as _norm
+        depth_map: dict[str, int] = {site_url.rstrip("/"): 0}
+        queue = deque([(site_url.rstrip("/"), 0)])
+        crawl_map = {c["url"]: c for c in crawl_results}
+        visited: set[str] = set()
+
+        while queue:
+            current_url, depth = queue.popleft()
+            if current_url in visited or depth > 6:
+                continue
+            visited.add(current_url)
+            crawl = crawl_map.get(current_url, {})
+            for link in crawl.get("internal_links", []):
+                if link not in depth_map:
+                    depth_map[link] = depth + 1
+                    queue.append((link, depth + 1))
+
+        for url, depth in depth_map.items():
+            if depth > 3:
+                page_res = db.table("pages").select("id").eq("site_id", site_id).eq("url", url).execute().data
+                pid = page_res[0]["id"] if page_res else None
+                existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "deep_page").eq("page_id", pid).execute().data if pid else []
+                if not existing:
+                    db.table("audit_issues").insert({
+                        "site_id": site_id,
+                        "page_id": pid,
+                        "severity": "improvement",
+                        "category": "structure",
+                        "issue_type": "deep_page",
+                        "description": f"Página a {depth} cliques da homepage: {url}",
+                        "recommendation": "Adicione links internos a partir de páginas com maior tráfego para reduzir a profundidade para ≤3 cliques.",
+                        "auto_fixable": False,
+                    }).execute()
+    except Exception as e:
+        log(site_id, "technical-audit", "deep_page_check", "error", error=str(e))
+
+    # ── CHECK 2.6: Imagens sem WebP ────────────────────────────────────────
+    try:
+        no_webp_count = 0
+        for crawl in crawl_results:
+            src_url = crawl["url"]
+            html_res = requests.get(src_url, timeout=5, headers={"User-Agent": "TOINSEOBot/1.0"})
+            if not html_res.ok:
+                continue
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_res.text, "html.parser")
+            for img in soup.find_all("img", src=True):
+                src = img["src"]
+                if any(src.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png"]):
+                    webp_url = src.rsplit(".", 1)[0] + ".webp"
+                    webp_url = urljoin(src_url, webp_url)
+                    try:
+                        wr = requests.head(webp_url, timeout=3, headers={"User-Agent": "TOINSEOBot/1.0"})
+                        if wr.status_code == 404:
+                            no_webp_count += 1
+                    except Exception:
+                        pass
+            if no_webp_count >= 5:
+                break
+
+        if no_webp_count > 0:
+            existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "images_no_webp").execute().data
+            if not existing:
+                db.table("audit_issues").insert({
+                    "site_id": site_id,
+                    "page_id": None,
+                    "severity": "improvement",
+                    "category": "speed",
+                    "issue_type": "images_no_webp",
+                    "description": f"Pelo menos {no_webp_count} imagens sem versão WebP detectadas",
+                    "recommendation": "Configure LiteSpeed Cache → Image Optimization → WebP Replacement para converter automaticamente JPG/PNG para WebP.",
+                    "auto_fixable": False,
+                }).execute()
+    except Exception as e:
+        log(site_id, "technical-audit", "webp_check", "error", error=str(e))
 
     db.table("sites").update({"audit_completed_at": datetime.now(timezone.utc).isoformat()}).eq("id", site_id).execute()
     log(site_id, "technical-audit", "complete_audit", "success")
