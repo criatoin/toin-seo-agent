@@ -62,6 +62,59 @@ Must be valid JSON. Include all relevant properties for {schema_type}."""
 
     print(f"✅ Schema proposals generated for site {site_id}")
 
+def generate_and_apply_all(site_id: str) -> dict:
+    """Generate schema via AI and apply immediately to WordPress for all pages without schema."""
+    import requests as _req, base64
+    db = get_db()
+
+    site = db.table("sites").select("*").eq("id", site_id).single().execute().data
+    if not site:
+        raise ValueError(f"Site {site_id} not found")
+    if site.get("type") != "wordpress":
+        raise PermissionError("Only WordPress sites supported for schema writes")
+
+    creds = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
+    wp_headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
+
+    pages = (db.table("pages")
+        .select("*")
+        .eq("site_id", site_id)
+        .eq("needs_schema_opt", True)
+        .not_.is_("post_id", "null")
+        .execute().data)
+
+    applied = 0
+    failed  = 0
+
+    for page in pages:
+        try:
+            result = generate_for_page(site_id, page["id"])
+            schema_json = result["schema_json"]
+
+            r = _req.post(
+                f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/schema",
+                headers=wp_headers,
+                json={"schema_json": schema_json},
+                timeout=10
+            )
+            if r.ok:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc).isoformat()
+                db.table("schema_proposals").update({"status": "applied", "applied_at": now}).eq("page_id", page["id"]).eq("status", "pending").execute()
+                db.table("pages").update({"schema_current": schema_json, "needs_schema_opt": False}).eq("id", page["id"]).execute()
+                applied += 1
+            else:
+                log(site_id, "generate-schemas", "apply_schema", "error", error=r.text, page_id=page["id"])
+                failed += 1
+        except Exception as e:
+            log(site_id, "generate-schemas", "generate_and_apply", "error", error=str(e), page_id=page["id"])
+            failed += 1
+
+    log(site_id, "generate-schemas", "complete", "success", payload={"applied": applied, "failed": failed})
+    print(f"✅ Schema aplicado para {applied} páginas ({failed} falhas)")
+    return {"applied": applied, "failed": failed, "total": len(pages)}
+
+
 def run(site_id: str):
     generate_schema_proposals(site_id)
 

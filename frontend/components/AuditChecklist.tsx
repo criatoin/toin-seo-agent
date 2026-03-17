@@ -477,16 +477,31 @@ function IssueTypeGroup({
   )
 }
 
-export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issue[]; siteId: string }) {
-  const [issues, setIssues]         = useState(initialIssues)
-  const [bulkFixing, setBulkFixing] = useState(false)
-  const [bulkMsg, setBulkMsg]       = useState('')
+export function AuditChecklist({ issues: initialIssues, siteId, pagesWithoutSchema = 0 }: { issues: Issue[]; siteId: string; pagesWithoutSchema?: number }) {
+  const [issues, setIssues]             = useState(initialIssues)
+  const [bulkFixing, setBulkFixing]     = useState(false)
+  const [bulkMsg, setBulkMsg]           = useState('')
+  const [schemaFixing, setSchemaFixing] = useState(false)
+  const [schemaMsg, setSchemaMsg]       = useState('')
 
   // Sync internal state when parent reloads data from API
   useEffect(() => { setIssues(initialIssues) }, [initialIssues])
 
   function handleUpdate(id: string, status: string) {
     setIssues(prev => prev.map(i => i.id === id ? { ...i, status } : i))
+  }
+
+  async function generateAllSchemas() {
+    setSchemaFixing(true)
+    setSchemaMsg('')
+    try {
+      await api.post('/api/jobs/generate-schemas', { site_id: siteId })
+      setSchemaMsg(`Schema iniciado para ${pagesWithoutSchema} página(s). Pode levar alguns minutos.`)
+    } catch (e: any) {
+      setSchemaMsg('Erro: ' + (e?.message || 'verifique os logs'))
+    } finally {
+      setSchemaFixing(false)
+    }
   }
 
   async function fixAllAuto() {
@@ -521,6 +536,24 @@ export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issu
 
   return (
     <div className="space-y-6">
+      {/* Schema bulk generation */}
+      {pagesWithoutSchema > 0 && (
+        <div className="flex items-center justify-between bg-gray-900 border border-gray-700 rounded-lg px-4 py-3">
+          <span className="text-sm text-gray-300">
+            {pagesWithoutSchema} página(s) sem schema estruturado
+          </span>
+          <div className="flex items-center gap-3">
+            {schemaMsg && <span className="text-xs text-indigo-400 max-w-xs text-right">{schemaMsg}</span>}
+            <button
+              onClick={generateAllSchemas}
+              disabled={schemaFixing}
+              className="text-sm px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50 transition-colors">
+              {schemaFixing ? 'Gerando...' : `🧩 Gerar schema para todas`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Bulk fix bar for auto-fixable */}
       {autoFixableOpen.length > 1 && (
         <div className="flex items-center justify-between bg-indigo-950/40 border border-indigo-800 rounded-lg px-4 py-3">

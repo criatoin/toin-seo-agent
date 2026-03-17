@@ -63,6 +63,14 @@ async def list_pages(
     }
 
 
+@router.get("/{site_id}/pages/schema-stats")
+async def schema_stats(site_id: str, _user=Depends(require_user)):
+    """Count of pages needing schema generation."""
+    db = get_db()
+    res = db.table("pages").select("id", count="exact").eq("site_id", site_id).eq("needs_schema_opt", True).not_.is_("post_id", "null").execute()
+    return {"without_schema": res.count or 0}
+
+
 @router.get("/{site_id}/pages/{page_id}")
 async def get_page(site_id: str, page_id: str, user=Depends(require_user)):
     db = get_db()
@@ -87,3 +95,49 @@ async def generate_schema_for_page(site_id: str, page_id: str, user=Depends(requ
         raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(500, f"Schema generation failed: {e}")
+
+
+@router.post("/{site_id}/pages/{page_id}/schema/apply")
+async def apply_schema_for_page(site_id: str, page_id: str, _user=Depends(require_user)):
+    """Apply the pending schema proposal for a page directly to WordPress."""
+    import asyncio, functools, requests as _req, base64
+    db = get_db()
+
+    page_res = db.table("pages").select("*").eq("id", page_id).eq("site_id", site_id).execute()
+    if not page_res.data:
+        raise HTTPException(404, "Page not found")
+    page = page_res.data[0]
+
+    if not page.get("post_id"):
+        raise HTTPException(400, "Page has no WordPress post_id — cannot apply via plugin")
+
+    proposal_res = (db.table("schema_proposals")
+        .select("*").eq("page_id", page_id).eq("status", "pending")
+        .order("created_at", desc=True).limit(1).execute())
+    if not proposal_res.data:
+        raise HTTPException(404, "No pending schema proposal for this page")
+    proposal = proposal_res.data[0]
+
+    site_res = db.table("sites").select("*").eq("id", site_id).execute()
+    if not site_res.data:
+        raise HTTPException(404, "Site not found")
+    site = site_res.data[0]
+
+    creds = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
+    headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
+
+    r = _req.post(
+        f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/schema",
+        headers=headers,
+        json={"schema_json": proposal["schema_json"]},
+        timeout=10
+    )
+    if not r.ok:
+        raise HTTPException(502, f"WordPress plugin error: {r.text}")
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    db.table("schema_proposals").update({"status": "applied", "applied_at": now}).eq("id", proposal["id"]).execute()
+    db.table("pages").update({"schema_current": proposal["schema_json"], "needs_schema_opt": False}).eq("id", page_id).execute()
+
+    return {"success": True, "schema_type": proposal["schema_type"]}

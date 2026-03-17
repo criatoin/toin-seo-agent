@@ -5,19 +5,24 @@ import { api } from '@/lib/api'
 import { useSiteId } from '@/lib/SiteContext'
 
 export default function Auditoria() {
-  const [issues, setIssues]     = useState<any[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [running, setRunning]   = useState(false)
-  const [syncing, setSyncing]   = useState(false)
-  const [status, setStatus]     = useState('')
+  const [issues, setIssues]                 = useState<any[]>([])
+  const [pagesWithoutSchema, setPagesWithoutSchema] = useState(0)
+  const [loading, setLoading]               = useState(true)
+  const [running, setRunning]               = useState(false)
+  const [syncing, setSyncing]               = useState(false)
+  const [status, setStatus]                 = useState('')
   const siteId = useSiteId()
 
   function loadIssues() {
     if (!siteId) { setLoading(false); return }
     setLoading(true)
-    api.get(`/api/sites/${siteId}/audit/issues`)
-      .then(setIssues)
-      .catch(() => setIssues([]))
+    Promise.all([
+      api.get(`/api/sites/${siteId}/audit/issues`),
+      api.get(`/api/sites/${siteId}/pages/schema-stats`).catch(() => ({ without_schema: 0 })),
+    ]).then(([iss, stats]: any) => {
+      setIssues(iss)
+      setPagesWithoutSchema(stats?.without_schema ?? 0)
+    }).catch(() => setIssues([]))
       .finally(() => setLoading(false))
   }
 
@@ -83,7 +88,7 @@ export default function Auditoria() {
       {loading ? (
         <p className="text-gray-500 text-sm">Carregando...</p>
       ) : (
-        <AuditChecklist issues={issues} siteId={siteId} />
+        <AuditChecklist issues={issues} siteId={siteId} pagesWithoutSchema={pagesWithoutSchema} />
       )}
     </div>
   )

@@ -61,6 +61,11 @@ async def job_apply_approved(body: JobBody, bg: BackgroundTasks, auth=Depends(re
     bg.add_task(_run_job_fn, "apply_changes_wp", "apply_approved_meta", body.site_id)
     return {"queued": "apply-approved", "site_id": body.site_id}
 
+@router.post("/generate-schemas")
+async def job_generate_schemas(body: JobBody, bg: BackgroundTasks, _auth=Depends(require_cron_or_user)):
+    bg.add_task(_run_job_fn, "schema_optimizer", "generate_and_apply_all", body.site_id)
+    return {"queued": "generate-schemas", "site_id": body.site_id}
+
 @router.post("/generate-report")
 async def job_generate_report(body: JobBody, bg: BackgroundTasks, auth=Depends(require_cron_or_user)):
     bg.add_task(_run_job, "generate_report", body.site_id)
