@@ -1,6 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from database import get_db
 from auth import require_user
+import os, sys
+_exec_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
+if _exec_path not in sys.path:
+    sys.path.insert(0, _exec_path)
 
 router = APIRouter()
 
@@ -43,3 +47,20 @@ async def get_page(site_id: str, page_id: str, user=Depends(require_user)):
     if not result.data:
         raise HTTPException(404, "Page not found")
     return result.data[0]
+
+
+@router.post("/{site_id}/pages/{page_id}/schema/generate")
+async def generate_schema_for_page(site_id: str, page_id: str, user=Depends(require_user)):
+    """Generate a schema JSON-LD proposal for a single page using AI."""
+    import asyncio, functools
+    from schema_optimizer import generate_for_page
+    try:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, functools.partial(generate_for_page, site_id, page_id)
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Schema generation failed: {e}")
