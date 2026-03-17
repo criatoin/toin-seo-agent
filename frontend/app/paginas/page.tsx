@@ -64,17 +64,37 @@ export default function Paginas() {
   const homePage = pages.find((p: any) => p.url.replace(/\/$/, '') === siteUrl)
   const otherPages = homePage ? pages.filter((p: any) => p.id !== homePage.id) : pages
 
-  const pagesWithoutData = pages.filter((p: any) => p.gsc_clicks == null).length
+  const allNullGsc = pages.length > 0 && pages.every((p: any) => p.gsc_clicks == null)
+  const noGscSort  = sortIdx !== 4 && allNullGsc  // not url-sort and no GSC data
 
   return (
     <div className="space-y-6">
+      {/* GSC data missing banner */}
+      {allNullGsc && pages.length > 0 && (
+        <div className="flex items-center justify-between bg-yellow-950/30 border border-yellow-800 rounded-lg px-4 py-3">
+          <div>
+            <p className="text-sm text-yellow-300 font-medium">Dados do Google Search Console não disponíveis</p>
+            <p className="text-xs text-yellow-600 mt-0.5">
+              Cliques, impressões, posição e CTR ficam em branco até a primeira sincronização.
+              O filtro por cliques/posição só funciona após sincronizar.
+            </p>
+          </div>
+          <button
+            onClick={syncGsc}
+            disabled={syncing}
+            className="ml-4 shrink-0 px-3 py-1.5 bg-yellow-700 hover:bg-yellow-600 text-white text-sm rounded disabled:opacity-50 transition-colors">
+            {syncing ? 'Sincronizando...' : '🔗 Sincronizar agora'}
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-b border-gray-800 pb-4 flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-semibold text-white">Páginas</h2>
           <p className="text-xs text-gray-500 mt-1">
             {total} páginas no total
-            {pagesWithoutData > 0 && (
-              <span className="ml-2 text-yellow-600">· {pagesWithoutData} sem dados GSC nesta página</span>
+            {noGscSort && (
+              <span className="ml-2 text-yellow-600">· ordenação por dados GSC indisponível</span>
             )}
           </p>
         </div>

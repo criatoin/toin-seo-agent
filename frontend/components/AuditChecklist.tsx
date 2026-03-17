@@ -356,7 +356,7 @@ function IssueCard({
 
           {!isActioned && (
             <div className="flex gap-2 mt-1 flex-wrap justify-end">
-              {issue.auto_fixable && (isMetaIssue || isAltIssue) && preview === null && altImages === null && (
+              {(isMetaIssue || isAltIssue) && preview === null && altImages === null && (
                 <button
                   onClick={generatePreview}
                   disabled={loadingPreview || loading}
@@ -449,37 +449,18 @@ function IssueTypeGroup({
 
   return (
     <div className="border border-gray-800 rounded-lg overflow-hidden">
-      {/* Group header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-900 gap-3">
-        <button
-          onClick={() => setExpanded(v => !v)}
-          className="flex items-center gap-2 flex-1 text-left min-w-0">
-          <span className="text-xs text-gray-500 shrink-0">{expanded ? '▼' : '▶'}</span>
-          <span className="text-sm font-medium text-white truncate">{label}</span>
-          <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded shrink-0">
-            {issueList.length}
-          </span>
-        </button>
-        {/* Bulk actions for groups with multiple items */}
-        {issueList.length > 1 && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => bulkAction('fixed')}
-              disabled={bulking}
-              className="text-xs px-2 py-1 bg-green-800 hover:bg-green-700 text-green-200 rounded disabled:opacity-50 transition-colors">
-              {bulking ? '...' : `✓ Todas resolvidas`}
-            </button>
-            <button
-              onClick={() => bulkAction('dismissed')}
-              disabled={bulking}
-              className="text-xs px-2 py-1 border border-gray-700 hover:border-gray-500 text-gray-400 rounded disabled:opacity-50 transition-colors">
-              Ignorar todas
-            </button>
-          </div>
-        )}
-      </div>
+      {/* Group header — click to expand */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-2 px-4 py-3 bg-gray-900 text-left hover:bg-gray-800/60 transition-colors">
+        <span className="text-xs text-gray-500 shrink-0">{expanded ? '▼' : '▶'}</span>
+        <span className="text-sm font-medium text-white truncate flex-1">{label}</span>
+        <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded shrink-0">
+          {issueList.length}
+        </span>
+      </button>
 
-      {/* Issues list */}
+      {/* Issues list + bulk actions */}
       {expanded && (
         <div className="divide-y divide-gray-800/60">
           {(issueList.length > COLLAPSE_THRESHOLD
@@ -490,11 +471,30 @@ function IssueTypeGroup({
               <IssueCard issue={issue} siteId={siteId} onUpdate={onUpdate} />
             </div>
           ))}
-          {issueList.length > COLLAPSE_THRESHOLD && (
-            <div className="px-4 py-3 text-center">
-              <p className="text-xs text-gray-500">
-                Mostrando 5 de {issueList.length}. Use as ações em lote acima para resolver ou ignorar todas.
-              </p>
+
+          {/* Bulk actions bar — always visible when expanded and multiple items */}
+          {issueList.length > 1 && (
+            <div className="px-4 py-3 bg-gray-900/60 border-t border-gray-800 flex items-center justify-between gap-3 flex-wrap">
+              {issueList.length > COLLAPSE_THRESHOLD && (
+                <p className="text-xs text-gray-500">
+                  Mostrando {COLLAPSE_THRESHOLD} de {issueList.length}
+                </p>
+              )}
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-xs text-gray-500">{issueList.length} itens:</span>
+                <button
+                  onClick={() => bulkAction('fixed')}
+                  disabled={bulking}
+                  className="text-xs px-3 py-1.5 bg-green-800 hover:bg-green-700 text-green-200 rounded disabled:opacity-50 transition-colors">
+                  {bulking ? '...' : '✓ Marcar todas resolvidas'}
+                </button>
+                <button
+                  onClick={() => bulkAction('dismissed')}
+                  disabled={bulking}
+                  className="text-xs px-3 py-1.5 border border-gray-700 hover:border-gray-500 text-gray-400 rounded disabled:opacity-50 transition-colors">
+                  Ignorar todas
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -80,6 +80,10 @@ def run(site_id: str):
             "schema_current":    schema_current,
             "needs_schema_opt":  schema_current is None,
         }
+        # Set post_id from WordPress API if available
+        wp_entry = wp_map.get(url) or wp_map.get(url.rstrip("/") + "/") or wp_map.get(url.rstrip("/"))
+        if wp_entry:
+            page_data["post_id"] = wp_entry.get("id")
         if existing:
             db.table("pages").update(page_data).eq("id", existing[0]["id"]).execute()
             page_id = existing[0]["id"]

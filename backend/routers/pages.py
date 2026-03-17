@@ -66,7 +66,7 @@ async def list_pages(
 async def schema_stats(site_id: str, _user=Depends(require_user)):
     """Count of pages needing schema generation."""
     db = get_db()
-    res = db.table("pages").select("id", count="exact").eq("site_id", site_id).eq("needs_schema_opt", True).not_.is_("post_id", "null").execute()
+    res = db.table("pages").select("id", count="exact").eq("site_id", site_id).eq("needs_schema_opt", True).execute()
     return {"without_schema": res.count or 0}
 
 
