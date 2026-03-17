@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { MetaVariationCard } from '@/components/MetaVariationCard'
+import { SchemaProposalCard } from '@/components/SchemaProposalCard'
 import { api } from '@/lib/api'
 
 export default function PageDetail() {
@@ -64,6 +65,13 @@ export default function PageDetail() {
           <MetaVariationCard proposal={proposal} siteId={siteId} pageId={id as string} />
         </section>
       )}
+
+      <SchemaProposalCard
+        pageId={id as string}
+        siteId={siteId}
+        currentSchema={page.schema_current ?? null}
+        postId={page.post_id ?? null}
+      />
     </div>
   )
 }
