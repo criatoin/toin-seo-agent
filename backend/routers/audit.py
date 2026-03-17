@@ -280,3 +280,33 @@ async def fix_all_auto(site_id: str, user=Depends(require_user)):
     db = get_db()
     result = db.table("audit_issues").update({"status": "in_progress"}).eq("site_id", site_id).eq("auto_fixable", True).eq("status", "open").execute()
     return {"queued": len(result.data) if result.data else 0}
+
+
+class BulkStatusUpdate(BaseModel):
+    ids: list[str]
+    status: str
+
+@router.patch("/{site_id}/audit/issues/bulk")
+async def bulk_update_issues(site_id: str, body: BulkStatusUpdate, _user=Depends(require_user)):
+    """Update status of multiple issues at once (avoids N parallel requests from frontend)."""
+    allowed = {"fixed", "dismissed", "open", "in_progress"}
+    if body.status not in allowed:
+        raise HTTPException(400, f"status must be one of {allowed}")
+    if not body.ids:
+        return {"updated": 0}
+    db = get_db()
+    from datetime import datetime, timezone
+    update_data: dict = {"status": body.status}
+    if body.status == "fixed":
+        update_data["fixed_at"] = datetime.now(timezone.utc).isoformat()
+    # Update in batches of 200 (PostgREST IN() limit)
+    updated = 0
+    for i in range(0, len(body.ids), 200):
+        batch = body.ids[i:i+200]
+        res = (db.table("audit_issues")
+            .update(update_data)
+            .eq("site_id", site_id)
+            .in_("id", batch)
+            .execute())
+        updated += len(res.data) if res.data else 0
+    return {"updated": updated}

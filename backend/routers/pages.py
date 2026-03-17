@@ -10,33 +10,56 @@ router = APIRouter()
 
 PAGE_SIZE = 50
 
+SORT_FIELDS = {"gsc_clicks", "gsc_impressions", "gsc_position", "gsc_ctr", "url"}
+
 @router.get("/{site_id}/pages")
 async def list_pages(
     site_id: str,
     page: int = Query(1, ge=1),
+    sort_by:  str = Query("gsc_clicks"),
+    sort_dir: str = Query("desc"),
     user=Depends(require_user)
 ):
     db     = get_db()
     offset = (page - 1) * PAGE_SIZE
 
+    # Validate sort params
+    if sort_by not in SORT_FIELDS:
+        sort_by = "gsc_clicks"
+    desc = sort_dir != "asc"
+    # nulls go last always (pages without GSC data sink to the bottom)
+    nullsfirst_val = False if desc else True
+
     # Total count
     count_res = db.table("pages").select("id", count="exact").eq("site_id", site_id).execute()
     total = count_res.count or 0
 
-    # Paginated data — pages with GSC data first, then the rest, ordered by clicks desc
+    # Site URL for homepage detection
+    site_res = db.table("sites").select("url").eq("id", site_id).execute().data
+    site_url = site_res[0]["url"].rstrip("/") if site_res else ""
+
     rows = (db.table("pages")
         .select("id,url,title_current,meta_desc_current,gsc_clicks,gsc_position,gsc_ctr,gsc_impressions,needs_meta_opt,has_empty_meta,audit_has_h1,audit_lcp_score,last_synced_at")
         .eq("site_id", site_id)
-        .order("gsc_clicks", desc=True, nullsfirst=False)
+        .order(sort_by, desc=desc, nullsfirst=nullsfirst_val)
         .range(offset, offset + PAGE_SIZE - 1)
         .execute().data)
 
+    # Pin homepage to top on first page regardless of sort
+    if page == 1 and site_url:
+        home = [p for p in rows if p["url"].rstrip("/") == site_url]
+        rest  = [p for p in rows if p["url"].rstrip("/") != site_url]
+        rows  = home + rest
+
     return {
-        "pages":    rows,
-        "total":    total,
-        "page":     page,
-        "per_page": PAGE_SIZE,
-        "total_pages": max(1, -(-total // PAGE_SIZE)),  # ceiling division
+        "pages":      rows,
+        "total":      total,
+        "page":       page,
+        "per_page":   PAGE_SIZE,
+        "total_pages": max(1, -(-total // PAGE_SIZE)),
+        "site_url":   site_url,
+        "sort_by":    sort_by,
+        "sort_dir":   sort_dir,
     }
 
 

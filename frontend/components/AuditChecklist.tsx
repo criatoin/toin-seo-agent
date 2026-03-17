@@ -343,11 +343,10 @@ function IssueTypeGroup({
   async function bulkAction(status: string) {
     setBulking(true)
     try {
-      await Promise.all(
-        issueList.map(i =>
-          api.patch(`/api/sites/${siteId}/audit/issues/${i.id}`, { status })
-        )
-      )
+      await api.patch(`/api/sites/${siteId}/audit/issues/bulk`, {
+        ids: issueList.map(i => i.id),
+        status,
+      })
       issueList.forEach(i => onUpdate(i.id, status))
     } catch {
       alert('Erro ao atualizar issues em lote')
