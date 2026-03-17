@@ -74,18 +74,41 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
         raise HTTPException(400, "Issue has no associated page")
 
     page_res = db.table("pages").select("*").eq("id", issue["page_id"]).execute()
+    site_res = db.table("sites").select("name,url").eq("id", site_id).execute()
     if not page_res.data:
         raise HTTPException(404, "Page not found")
     page = page_res.data[0]
+    site = site_res.data[0] if site_res.data else {}
 
     import asyncio, functools
     from deepseek_client import complete
 
+    # Build context from available data
+    site_name = site.get("name", "")
+    site_url  = site.get("url", "")
+    top_queries = page.get("gsc_top_queries") or []
+    queries_str = ""
+    if top_queries:
+        if isinstance(top_queries, list):
+            queries_str = ", ".join(
+                q.get("query", q) if isinstance(q, dict) else str(q)
+                for q in top_queries[:5]
+            )
+        queries_str = f"\nPrincipais buscas que chegam nesta página: {queries_str}"
+
     prompt = (
-        f"Escreva uma meta description atraente de 150-160 caracteres em português (pt-BR) para esta página:\n"
-        f"URL: {page['url']}\n"
+        f"Você é um especialista em SEO. Escreva uma meta description precisa e informativa "
+        f"de 140-160 caracteres em português (pt-BR) para a página abaixo.\n\n"
+        f"Regras:\n"
+        f"- Descreva o conteúdo real da página, sem exageros promocionais\n"
+        f"- Use linguagem clara e direta, focada no que o usuário vai encontrar\n"
+        f"- Inclua a palavra-chave principal naturalmente, se possível\n"
+        f"- NÃO use frases genéricas como 'Acesse e veja', 'Conheça nosso'\n\n"
+        f"Site: {site_name} ({site_url})\n"
+        f"URL da página: {page['url']}\n"
         f"Título: {page.get('title_current', '')}\n"
-        f"H1: {page.get('h1_current', '')}\n\n"
+        f"H1: {page.get('h1_current', '')}"
+        f"{queries_str}\n\n"
         f"Retorne apenas o texto da meta description, sem aspas, sem explicações."
     )
 
