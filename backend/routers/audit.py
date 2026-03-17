@@ -74,7 +74,7 @@ async def update_issue_status(
 
 @router.post("/{site_id}/audit/issues/{issue_id}/preview-fix")
 async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
-    """Generate a meta description suggestion for a missing-meta issue (does not apply it)."""
+    """Generate fix preview for missing-meta or images-no-alt issues (does not apply)."""
     db = get_db()
     issue_res = db.table("audit_issues").select("*").eq("id", issue_id).eq("site_id", site_id).execute()
     if not issue_res.data:
@@ -83,6 +83,11 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
 
     if not issue.get("page_id"):
         raise HTTPException(400, "Issue has no associated page")
+
+    # Route to correct handler based on issue type
+    if issue.get("issue_type") == "images_no_alt":
+        return await _preview_images_alt(issue, db)
+
 
     page_res = db.table("pages").select("*").eq("id", issue["page_id"]).execute()
     site_res = db.table("sites").select("name,url").eq("id", site_id).execute()
@@ -219,7 +224,122 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
             "is_fallback": True,
         }
 
-    return {"suggestion": suggestion, "page_id": page["id"], "url": page["url"], "is_fallback": False}
+    return {"type": "meta_desc", "suggestion": suggestion, "page_id": page["id"], "url": page["url"], "is_fallback": False}
+
+
+async def _preview_images_alt(issue: dict, db) -> dict:
+    """Find images without alt on the page and generate AI alt text suggestions."""
+    import asyncio, functools, re as _re
+    from deepseek_client import complete
+    from bs4 import BeautifulSoup
+
+    page_res = db.table("pages").select("url,title_current,h1_current").eq("id", issue["page_id"]).execute()
+    if not page_res.data:
+        raise HTTPException(404, "Page not found")
+    page = page_res.data[0]
+    page_url = page["url"]
+
+    def _fetch_images(url: str) -> list[dict]:
+        try:
+            r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0 (SEO-Agent/1.0)"})
+            if not r.ok:
+                return []
+            soup = BeautifulSoup(r.text, "html.parser")
+            images = []
+            for img in soup.find_all("img"):
+                alt = img.get("alt", "").strip()
+                if alt:
+                    continue  # already has alt
+                src = img.get("src", "").strip()
+                if not src or src.startswith("data:"):
+                    continue
+                # Only WP-hosted images (in uploads path)
+                if "wp-content/uploads" not in src and "wp-content" not in src:
+                    continue
+                filename = src.split("/")[-1].split("?")[0]
+                # Strip size suffix from filename for cleaner name
+                name = _re.sub(r"-\d+x\d+$", "", filename.rsplit(".", 1)[0]).replace("-", " ").replace("_", " ")
+                images.append({"src": src, "filename": filename, "name": name})
+            return images[:12]  # limit to 12 images max
+        except Exception:
+            return []
+
+    loop = asyncio.get_event_loop()
+    images = await loop.run_in_executor(None, _fetch_images, page_url)
+
+    if not images:
+        return {"type": "images_alt", "images": [], "message": "Nenhuma imagem sem alt encontrada ou página não acessível."}
+
+    # Build single AI prompt for all images at once
+    page_ctx = f"Página: {page.get('title_current') or page.get('h1_current') or page_url}"
+    img_list = "\n".join(f"{i+1}. {img['name']} (arquivo: {img['filename']})" for i, img in enumerate(images))
+    prompt = (
+        f"Você é especialista em SEO e acessibilidade. Gere alt text descritivo para imagens.\n\n"
+        f"{page_ctx}\n\n"
+        f"Imagens sem alt text:\n{img_list}\n\n"
+        f"Retorne JSON válido no formato:\n"
+        f'{{"1": "alt para imagem 1", "2": "alt para imagem 2", ...}}\n\n'
+        f"Regras: máximo 100 caracteres por alt, em português (pt-BR), descritivo e específico. "
+        f"Sem prefixos como 'Imagem de' ou 'Foto de'."
+    )
+
+    try:
+        raw = await loop.run_in_executor(None, functools.partial(complete, prompt, max_tokens=600))
+        raw = raw.strip()
+        start = raw.find("{"); end = raw.rfind("}") + 1
+        alts = json.loads(raw[start:end])
+    except Exception:
+        # Fallback: use name as alt text
+        alts = {str(i+1): img["name"].title() for i, img in enumerate(images)}
+
+    result = []
+    for i, img in enumerate(images):
+        suggested = alts.get(str(i+1), img["name"].title())[:100]
+        result.append({"src": img["src"], "filename": img["filename"], "suggested_alt": suggested})
+
+    return {"type": "images_alt", "images": result, "page_id": issue["page_id"], "url": page_url}
+
+
+class ApplyImagesAltBody(BaseModel):
+    images: list[dict]   # [{src: str, alt: str}]
+
+@router.post("/{site_id}/audit/issues/{issue_id}/apply-images-alt")
+async def apply_images_alt(site_id: str, issue_id: str, body: ApplyImagesAltBody, _user=Depends(require_user)):
+    """Apply AI-generated alt text to images via the WordPress plugin."""
+    db = get_db()
+    issue_res = db.table("audit_issues").select("*").eq("id", issue_id).eq("site_id", site_id).execute()
+    if not issue_res.data:
+        raise HTTPException(404, "Issue not found")
+    issue = issue_res.data[0]
+
+    page_res = db.table("pages").select("post_id").eq("id", issue["page_id"]).execute()
+    site_res = db.table("sites").select("url,wp_user,wp_app_password,type").eq("id", site_id).execute()
+    if not page_res.data or not site_res.data:
+        raise HTTPException(404, "Page or site not found")
+
+    page = page_res.data[0]
+    site = site_res.data[0]
+
+    if site["type"] != "wordpress" or not page.get("post_id"):
+        raise HTTPException(400, "Alt text fix only available for WordPress sites")
+
+    creds   = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
+    headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
+
+    r = requests.post(
+        f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/images/alt",
+        headers=headers,
+        json={"images": [{"src": img["src"], "alt": img["alt"]} for img in body.images]},
+        timeout=15,
+    )
+    if not r.ok:
+        raise HTTPException(502, f"WordPress write failed: {r.text[:200]}")
+
+    wp_result = r.json()
+    now = datetime.now(timezone.utc).isoformat()
+    db.table("audit_issues").update({"status": "fixed", "fixed_at": now}).eq("id", issue_id).execute()
+
+    return {"fixed": True, "updated": wp_result.get("updated", 0), "not_found": wp_result.get("not_found", [])}
 
 
 class ApplyFixBody(BaseModel):

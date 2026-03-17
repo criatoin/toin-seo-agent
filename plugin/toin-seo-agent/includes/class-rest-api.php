@@ -55,6 +55,15 @@ class TOIN_SEO_REST_API {
                 'id' => ['required' => true, 'validate_callback' => 'is_numeric'],
             ],
         ]);
+
+        register_rest_route(self::NS, '/pages/(?P<id>\d+)/images/alt', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'update_images_alt'],
+            'permission_callback' => $auth,
+            'args'                => [
+                'id' => ['required' => true, 'validate_callback' => 'is_numeric'],
+            ],
+        ]);
     }
 
     // ── Handlers ────────────────────────────────────────────────────────────
@@ -182,5 +191,50 @@ class TOIN_SEO_REST_API {
         update_post_meta($id, '_toin_seo_canonical', $url);
 
         return new WP_REST_Response(['success' => true, 'canonical_url' => $url]);
+    }
+
+    /**
+     * Bulk update alt text for images.
+     * Body: { images: [{src: "https://...", alt: "alt text"}] }
+     * Finds attachment ID by URL, updates _wp_attachment_image_alt meta.
+     */
+    public function update_images_alt(WP_REST_Request $request): WP_REST_Response {
+        $images = $request->get_param('images');
+
+        if (!is_array($images) || empty($images)) {
+            return new WP_REST_Response(['error' => 'images must be a non-empty array'], 400);
+        }
+
+        $updated   = 0;
+        $not_found = [];
+
+        foreach ($images as $item) {
+            $src = esc_url_raw((string) ($item['src'] ?? ''));
+            $alt = sanitize_text_field((string) ($item['alt'] ?? ''));
+
+            if (!$src) continue;
+
+            // Try exact URL first
+            $attachment_id = attachment_url_to_postid($src);
+
+            // If not found, try stripping size suffix (-300x200) from filename
+            if (!$attachment_id) {
+                $src_clean     = preg_replace('/-\d+x\d+(\.\w+)$/', '$1', $src);
+                $attachment_id = attachment_url_to_postid($src_clean);
+            }
+
+            if ($attachment_id) {
+                update_post_meta($attachment_id, '_wp_attachment_image_alt', $alt);
+                $updated++;
+            } else {
+                $not_found[] = basename($src);
+            }
+        }
+
+        return new WP_REST_Response([
+            'success'   => true,
+            'updated'   => $updated,
+            'not_found' => $not_found,
+        ]);
     }
 }

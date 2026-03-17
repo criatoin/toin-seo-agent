@@ -121,6 +121,8 @@ function SpeedGuidance({ issue_type }: { issue_type: string }) {
   )
 }
 
+type AltImage = { src: string; filename: string; suggested_alt: string; edited: string }
+
 function IssueCard({
   issue, siteId,
   onUpdate,
@@ -136,10 +138,14 @@ function IssueCard({
   const [applying, setApplying]     = useState(false)
   const [editedPreview, setEditedPreview] = useState('')
   const [showSpeed, setShowSpeed]   = useState(false)
+  // Images alt state
+  const [altImages, setAltImages]   = useState<AltImage[] | null>(null)
+  const [altMsg, setAltMsg]         = useState('')
 
-  const isActioned  = issue.status !== 'open' && issue.status !== 'in_progress'
-  const isMetaIssue = issue.issue_type === 'missing_meta_desc'
-  const isSpeedIssue = issue.category === 'speed'
+  const isActioned    = issue.status !== 'open' && issue.status !== 'in_progress'
+  const isMetaIssue   = issue.issue_type === 'missing_meta_desc'
+  const isAltIssue    = issue.issue_type === 'images_no_alt'
+  const isSpeedIssue  = issue.category === 'speed'
 
   async function changeStatus(status: string) {
     setLoading(true)
@@ -156,14 +162,24 @@ function IssueCard({
   async function generatePreview() {
     setLoadingPreview(true)
     setPreview(null)
+    setAltImages(null)
+    setAltMsg('')
     try {
       const res: any = await api.post(
         `/api/sites/${siteId}/audit/issues/${issue.id}/preview-fix`,
         {}
       )
-      setPreview(res.suggestion)
-      setEditedPreview(res.suggestion)
-      setIsFallback(!!res.is_fallback)
+      if (res.type === 'images_alt') {
+        if (!res.images?.length) {
+          setAltMsg(res.message || 'Nenhuma imagem sem alt text encontrada.')
+        } else {
+          setAltImages(res.images.map((img: any) => ({ ...img, edited: img.suggested_alt })))
+        }
+      } else {
+        setPreview(res.suggestion)
+        setEditedPreview(res.suggestion)
+        setIsFallback(!!res.is_fallback)
+      }
     } catch (e: any) {
       alert('Erro ao gerar sugestão: ' + (e?.message || 'tente novamente'))
     } finally {
@@ -182,6 +198,22 @@ function IssueCard({
       setPreview(null)
     } catch (e: any) {
       alert('Erro ao aplicar: ' + (e?.message || 'tente novamente'))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  async function applyAltFix() {
+    if (!altImages?.length) return
+    setApplying(true)
+    try {
+      await api.post(`/api/sites/${siteId}/audit/issues/${issue.id}/apply-images-alt`, {
+        images: altImages.map(img => ({ src: img.src, alt: img.edited })),
+      })
+      onUpdate(issue.id, 'fixed')
+      setAltImages(null)
+    } catch (e: any) {
+      alert('Erro ao aplicar alt text: ' + (e?.message || 'tente novamente'))
     } finally {
       setApplying(false)
     }
@@ -210,13 +242,13 @@ function IssueCard({
           )}
           {showSpeed && isSpeedIssue && <SpeedGuidance issue_type={issue.issue_type} />}
 
-          {/* Meta preview inline */}
+          {/* Meta description preview inline */}
           {preview !== null && !isActioned && (
             <div className="mt-3 p-3 bg-gray-800/60 rounded-lg border border-gray-600 space-y-2">
               {isFallback ? (
                 <p className="text-xs text-yellow-400">⚠️ IA indisponível — sugestão automática gerada sem AI. Edite antes de aplicar.</p>
               ) : (
-                <p className="text-xs font-medium text-gray-300">Sugestão gerada pela IA:</p>
+                <p className="text-xs font-medium text-gray-300">Sugestão de meta description gerada pela IA:</p>
               )}
               <textarea
                 value={editedPreview}
@@ -228,24 +260,58 @@ function IssueCard({
               <div className="flex items-center justify-between">
                 <span className="text-xs text-gray-500">{editedPreview.length}/160 caracteres</span>
                 <div className="flex gap-2">
-                  <button
-                    onClick={generatePreview}
-                    disabled={loadingPreview}
+                  <button onClick={generatePreview} disabled={loadingPreview}
                     className="text-xs px-2 py-1 border border-gray-600 text-gray-400 hover:border-gray-400 rounded disabled:opacity-50 transition-colors">
                     {loadingPreview ? 'Gerando...' : '↺ Nova sugestão'}
                   </button>
-                  <button
-                    onClick={() => { setPreview(null) }}
+                  <button onClick={() => setPreview(null)}
                     className="text-xs px-2 py-1 border border-gray-600 text-gray-400 hover:border-gray-400 rounded transition-colors">
                     Cancelar
                   </button>
-                  <button
-                    onClick={applyFix}
-                    disabled={applying || !editedPreview}
+                  <button onClick={applyFix} disabled={applying || !editedPreview}
                     className="text-xs px-3 py-1 bg-green-700 hover:bg-green-600 text-white rounded disabled:opacity-50 transition-colors">
                     {applying ? 'Aplicando...' : '✓ Confirmar e aplicar'}
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Images alt text preview inline */}
+          {altMsg && !isActioned && (
+            <p className="mt-2 text-xs text-yellow-400">{altMsg}</p>
+          )}
+          {altImages !== null && !isActioned && (
+            <div className="mt-3 p-3 bg-gray-800/60 rounded-lg border border-gray-600 space-y-3">
+              <p className="text-xs font-medium text-gray-300">
+                Alt text gerado pela IA para {altImages.length} imagem(ns) — edite se necessário:
+              </p>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {altImages.map((img, i) => (
+                  <div key={img.src} className="space-y-1">
+                    <p className="text-xs text-gray-500 truncate" title={img.src}>{img.filename}</p>
+                    <input
+                      type="text"
+                      value={img.edited}
+                      maxLength={100}
+                      onChange={e => setAltImages(prev => prev!.map((x, j) =>
+                        j === i ? { ...x, edited: e.target.value } : x
+                      ))}
+                      className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                    <p className="text-xs text-gray-600 text-right">{img.edited.length}/100</p>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-1 border-t border-gray-700">
+                <button onClick={() => setAltImages(null)}
+                  className="text-xs px-2 py-1 border border-gray-600 text-gray-400 hover:border-gray-400 rounded transition-colors">
+                  Cancelar
+                </button>
+                <button onClick={applyAltFix} disabled={applying}
+                  className="text-xs px-3 py-1 bg-green-700 hover:bg-green-600 text-white rounded disabled:opacity-50 transition-colors">
+                  {applying ? 'Aplicando...' : `✓ Aplicar ${altImages.length} alt text(s)`}
+                </button>
               </div>
             </div>
           )}
@@ -264,7 +330,7 @@ function IssueCard({
 
           {!isActioned && (
             <div className="flex gap-2 mt-1 flex-wrap justify-end">
-              {issue.auto_fixable && isMetaIssue && preview === null && (
+              {issue.auto_fixable && (isMetaIssue || isAltIssue) && preview === null && altImages === null && (
                 <button
                   onClick={generatePreview}
                   disabled={loadingPreview || loading}
@@ -272,7 +338,7 @@ function IssueCard({
                   {loadingPreview ? 'Gerando...' : 'Corrigir'}
                 </button>
               )}
-              {issue.auto_fixable && !isMetaIssue && (
+              {issue.auto_fixable && !isMetaIssue && !isAltIssue && (
                 <button
                   onClick={() => changeStatus('in_progress')}
                   disabled={loading}

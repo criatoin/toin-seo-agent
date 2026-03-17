@@ -118,7 +118,7 @@ def run(site_id: str):
         if crawl["images_no_alt"] > 0:
             _add_issue(db, site_id, page_id, "improvement", "onpage", "images_no_alt",
                 f"{crawl['images_no_alt']} imagens sem alt text: {url}",
-                "Adicione alt text descritivo a todas as imagens")
+                "Adicione alt text descritivo a todas as imagens", auto_fixable=True)
 
     # PageSpeed for homepage
     for strategy in ["mobile", "desktop"]:
