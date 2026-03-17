@@ -64,3 +64,132 @@ Must be valid JSON. Include all relevant properties for {schema_type}."""
 
 def run(site_id: str):
     generate_schema_proposals(site_id)
+
+
+import requests as _requests
+from bs4 import BeautifulSoup as _BS
+
+def _fetch_page_text_for_schema(url: str) -> str:
+    """Fetch page HTML and extract readable text for schema generation."""
+    try:
+        r = _requests.get(url, timeout=8, headers={"User-Agent": "TOINSEOBot/1.0"})
+        if not r.ok:
+            return ""
+        soup = _BS(r.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "header", "footer", "aside", "noscript"]):
+            tag.decompose()
+        chunks = []
+        for tag in soup.find_all(["h1", "h2", "h3", "p"]):
+            text = tag.get_text(" ", strip=True)
+            if len(text) > 20:
+                chunks.append(text)
+            if sum(len(c) for c in chunks) > 1000:
+                break
+        return " | ".join(chunks)[:1000]
+    except Exception:
+        return ""
+
+
+def _infer_schema_type_from_url(url: str) -> str:
+    """Fallback: infer schema type from URL pattern when AI is unavailable."""
+    from urllib.parse import urlparse
+    path = urlparse(url).path.lower()
+    if path in ("/", ""):
+        return "Organization"
+    if any(kw in path for kw in ["/blog/", "/post/", "/artigo/", "/news/"]):
+        return "Article"
+    if any(kw in path for kw in ["/servico", "/service", "/solucao"]):
+        return "Service"
+    if any(kw in path for kw in ["/produto", "/product", "/loja"]):
+        return "Product"
+    if any(kw in path for kw in ["/faq", "/perguntas"]):
+        return "FAQPage"
+    return "WebPage"
+
+
+def generate_for_page(site_id: str, page_id: str) -> dict:
+    """
+    Generate a schema proposal for a single page.
+    Returns { proposal_id, schema_type, schema_json, rationale, is_fallback }.
+    Saves result to schema_proposals table with status='pending'.
+    """
+    db = get_db()
+
+    page_res = db.table("pages").select("*").eq("id", page_id).execute()
+    if not page_res.data:
+        raise ValueError(f"Page {page_id} not found")
+    page = page_res.data[0]
+
+    site_res = db.table("sites").select("name,url").eq("id", site_id).execute()
+    site = site_res.data[0] if site_res.data else {}
+
+    page_text = _fetch_page_text_for_schema(page["url"])
+    content_block = f"\nConteúdo da página:\n{page_text}" if page_text else ""
+
+    prompt = (
+        f"Você é especialista em SEO técnico. Gere um schema JSON-LD completo e válido para esta página.\n\n"
+        f"Site: {site.get('name', '')} ({site.get('url', '')})\n"
+        f"URL: {page['url']}\n"
+        f"Título: {page.get('title_current', '')}\n"
+        f"H1: {page.get('h1_current', '')}\n"
+        f"Meta description: {page.get('meta_desc_current', '')}"
+        f"{content_block}\n\n"
+        f"Instruções:\n"
+        f"1. Detecte o tipo de schema mais adequado (Organization, Article, Service, Product, FAQPage, LocalBusiness, WebPage)\n"
+        f"2. Gere o JSON-LD completo com todas as propriedades relevantes preenchidas\n"
+        f"3. Use dados reais da página — não invente informações\n"
+        f"4. Retorne um objeto JSON com duas chaves:\n"
+        f'   - "schema_type": string com o tipo detectado\n'
+        f'   - "schema_json": objeto JSON-LD completo (conteúdo do <script type="application/ld+json">)\n'
+        f'   - "rationale": string de 1 frase explicando por que escolheu este tipo\n'
+        f"Retorne apenas o JSON, sem markdown, sem explicações extras."
+    )
+
+    is_fallback = False
+    schema_type = _infer_schema_type_from_url(page["url"])
+    schema_json = {
+        "@context": "https://schema.org",
+        "@type": schema_type,
+        "url": page["url"],
+        "name": page.get("title_current", ""),
+        "description": page.get("meta_desc_current", ""),
+    }
+    rationale = f"Schema {schema_type} inferido pela estrutura da URL (IA indisponível)"
+
+    try:
+        raw = complete(prompt, max_tokens=800)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        start = raw.find("{")
+        end   = raw.rfind("}") + 1
+        parsed = json.loads(raw[start:end])
+        schema_type = parsed.get("schema_type", schema_type)
+        schema_json = parsed.get("schema_json", schema_json)
+        rationale   = parsed.get("rationale", rationale)
+    except Exception as e:
+        log(site_id, "generate-schema", "generate_for_page", "warning",
+            error=str(e), page_id=page_id)
+        is_fallback = True
+
+    # Delete previous pending proposal for this page (replace with fresh one)
+    db.table("schema_proposals").delete().eq("page_id", page_id).eq("status", "pending").execute()
+
+    res = db.table("schema_proposals").insert({
+        "page_id":     page_id,
+        "schema_type": schema_type,
+        "schema_json": schema_json,
+        "rationale":   rationale,
+        "status":      "pending",
+    }).execute()
+
+    proposal_id = res.data[0]["id"]
+    return {
+        "proposal_id": proposal_id,
+        "schema_type": schema_type,
+        "schema_json": schema_json,
+        "rationale":   rationale,
+        "is_fallback": is_fallback,
+    }
