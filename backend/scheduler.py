@@ -3,8 +3,8 @@ APScheduler cron runner — embedded in the FastAPI process.
 Replaces Coolify Scheduled Tasks (API not available in beta.460).
 
 Schedule mirrors the CLAUDE.md spec (all times UTC):
-  weekly-monitor      0 11 * * 1   (Mon 08h BRT)
-  sync-gsc            0 12 * * 1   (Mon 09h BRT)
+  sync-gsc            0 11 * * 1   (Mon 08h BRT)
+  weekly-monitor      0 12 * * 1   (Mon 09h BRT, after sync)
   apply-safe-routines 0 14 * * 1   (Mon 11h BRT)
   generate-proposals  0 13 1 */3 * (1st of month, quarterly)
   monthly-briefing    0 11 1 * *   (1st of month 08h BRT)
@@ -88,18 +88,18 @@ def _run_apply_approved():
 def create_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
 
-    # Mon 11:00 UTC — weekly monitor + alerts
-    scheduler.add_job(
-        lambda: _run_for_all_sites("weekly_monitor"),
-        CronTrigger(day_of_week="mon", hour=11, minute=0),
-        id="weekly_monitor", replace_existing=True,
-    )
-
-    # Mon 12:00 UTC — sync GSC data
+    # Mon 11:00 UTC — sync GSC data first (08h BRT)
     scheduler.add_job(
         lambda: _run_for_all_sites("gsc_client"),
-        CronTrigger(day_of_week="mon", hour=12, minute=0),
+        CronTrigger(day_of_week="mon", hour=11, minute=0),
         id="sync_gsc", replace_existing=True,
+    )
+
+    # Mon 12:00 UTC — weekly monitor + alerts (09h BRT, after sync)
+    scheduler.add_job(
+        lambda: _run_for_all_sites("weekly_monitor"),
+        CronTrigger(day_of_week="mon", hour=12, minute=0),
+        id="weekly_monitor", replace_existing=True,
     )
 
     # Mon 14:00 UTC — apply safe routines (auto-fill empty meta, fix canonicals)

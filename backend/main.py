@@ -58,12 +58,10 @@ def health():
 @app.get("/api/scheduler/jobs")
 def list_scheduled_jobs():
     """List all scheduled jobs and their next run times (admin use)."""
-    from apscheduler.schedulers.background import BackgroundScheduler
-    # Re-import via app state not available here; return static config instead
     return {
         "jobs": [
-            {"id": "weekly_monitor",      "cron": "0 11 * * 1",   "description": "Weekly monitor + alerts"},
-            {"id": "sync_gsc",            "cron": "0 12 * * 1",   "description": "Sync GSC data"},
+            {"id": "sync_gsc",            "cron": "0 11 * * 1",   "description": "Sync GSC data"},
+            {"id": "weekly_monitor",      "cron": "0 12 * * 1",   "description": "Weekly monitor + alerts"},
             {"id": "apply_safe_routines", "cron": "0 14 * * 1",   "description": "Apply safe routines"},
             {"id": "generate_proposals",  "cron": "0 13 1 */3 *", "description": "Generate meta/schema proposals (quarterly)"},
             {"id": "monthly_briefing",    "cron": "0 11 1 * *",   "description": "Monthly content briefing"},
