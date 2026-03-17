@@ -309,6 +309,109 @@ function IssueCard({
   )
 }
 
+const ISSUE_TYPE_LABEL: Record<string, string> = {
+  orphan_page:           'Páginas Órfãs',
+  missing_meta_desc:     'Meta description ausente',
+  missing_h1:            'H1 ausente',
+  multiple_h1:           'Múltiplos H1',
+  duplicate_title:       'Títulos duplicados',
+  lcp_poor:              'LCP ruim',
+  cls_poor:              'CLS ruim',
+  inp_poor:              'INP ruim',
+  images_no_alt:         'Imagens sem alt text',
+  images_no_webp:        'Imagens sem WebP',
+  broken_internal_link:  'Links internos quebrados',
+  redirect_chain:        'Cadeia de redirecionamentos',
+  deep_page:             'Página muito profunda (>3 cliques)',
+  robots_blocking_pages: 'Páginas bloqueadas pelo robots.txt',
+}
+
+function IssueTypeGroup({
+  issueType, issueList, siteId, onUpdate,
+}: {
+  issueType: string
+  issueList: Issue[]
+  siteId: string
+  onUpdate: (id: string, status: string) => void
+}) {
+  const [expanded, setExpanded] = useState(issueList.length <= 3)
+  const [bulking, setBulking]   = useState(false)
+  const COLLAPSE_THRESHOLD      = 5
+
+  const label = ISSUE_TYPE_LABEL[issueType] || issueType
+
+  async function bulkAction(status: string) {
+    setBulking(true)
+    try {
+      await Promise.all(
+        issueList.map(i =>
+          api.patch(`/api/sites/${siteId}/audit/issues/${i.id}`, { status })
+        )
+      )
+      issueList.forEach(i => onUpdate(i.id, status))
+    } catch {
+      alert('Erro ao atualizar issues em lote')
+    } finally {
+      setBulking(false)
+    }
+  }
+
+  return (
+    <div className="border border-gray-800 rounded-lg overflow-hidden">
+      {/* Group header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-gray-900 gap-3">
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center gap-2 flex-1 text-left min-w-0">
+          <span className="text-xs text-gray-500 shrink-0">{expanded ? '▼' : '▶'}</span>
+          <span className="text-sm font-medium text-white truncate">{label}</span>
+          <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded shrink-0">
+            {issueList.length}
+          </span>
+        </button>
+        {/* Bulk actions for groups with multiple items */}
+        {issueList.length > 1 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => bulkAction('fixed')}
+              disabled={bulking}
+              className="text-xs px-2 py-1 bg-green-800 hover:bg-green-700 text-green-200 rounded disabled:opacity-50 transition-colors">
+              {bulking ? '...' : `✓ Todas resolvidas`}
+            </button>
+            <button
+              onClick={() => bulkAction('dismissed')}
+              disabled={bulking}
+              className="text-xs px-2 py-1 border border-gray-700 hover:border-gray-500 text-gray-400 rounded disabled:opacity-50 transition-colors">
+              Ignorar todas
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Issues list */}
+      {expanded && (
+        <div className="divide-y divide-gray-800/60">
+          {(issueList.length > COLLAPSE_THRESHOLD
+            ? issueList.slice(0, COLLAPSE_THRESHOLD)
+            : issueList
+          ).map(issue => (
+            <div key={issue.id} className="px-3 py-1">
+              <IssueCard issue={issue} siteId={siteId} onUpdate={onUpdate} />
+            </div>
+          ))}
+          {issueList.length > COLLAPSE_THRESHOLD && (
+            <div className="px-4 py-3 text-center">
+              <p className="text-xs text-gray-500">
+                Mostrando 5 de {issueList.length}. Use as ações em lote acima para resolver ou ignorar todas.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issue[]; siteId: string }) {
   const [issues, setIssues]         = useState(initialIssues)
   const [bulkFixing, setBulkFixing] = useState(false)
@@ -325,9 +428,7 @@ export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issu
     setBulkFixing(true)
     setBulkMsg('')
     try {
-      // Mark all open auto-fixable issues as in_progress in DB
       await api.post(`/api/sites/${siteId}/audit/fix-all-auto`, {})
-      // Trigger the background apply-safe-routines job
       await api.post('/api/jobs/apply-safe-routines', { site_id: siteId })
       setIssues(prev => prev.map(i =>
         i.auto_fixable && i.status === 'open' ? { ...i, status: 'in_progress' } : i
@@ -343,7 +444,8 @@ export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issu
   const open = issues.filter(i => i.status === 'open' || i.status === 'in_progress')
   const done  = issues.filter(i => i.status === 'fixed' || i.status === 'dismissed')
 
-  const grouped = open.reduce((acc, issue) => {
+  // Group open issues: first by severity, then by issue_type
+  const bySeverity = open.reduce((acc, issue) => {
     acc[issue.severity] = acc[issue.severity] || []
     acc[issue.severity].push(issue)
     return acc
@@ -354,7 +456,7 @@ export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issu
 
   return (
     <div className="space-y-6">
-      {/* Bulk fix bar */}
+      {/* Bulk fix bar for auto-fixable */}
       {autoFixableOpen.length > 1 && (
         <div className="flex items-center justify-between bg-indigo-950/40 border border-indigo-800 rounded-lg px-4 py-3">
           <span className="text-sm text-indigo-300">
@@ -372,18 +474,34 @@ export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issu
         </div>
       )}
 
-      {order.filter(s => grouped[s]?.length).map(severity => (
-        <section key={severity}>
-          <h3 className={`text-sm font-medium mb-3 ${SEVERITY_TEXT[severity]}`}>
-            {SEVERITY_LABEL[severity]} ({grouped[severity].length})
-          </h3>
-          <div className="space-y-2">
-            {grouped[severity].map(issue => (
-              <IssueCard key={issue.id} issue={issue} siteId={siteId} onUpdate={handleUpdate} />
-            ))}
-          </div>
-        </section>
-      ))}
+      {order.filter(s => bySeverity[s]?.length).map(severity => {
+        // Group issues in this severity by issue_type
+        const byType = bySeverity[severity].reduce((acc, issue) => {
+          const t = issue.issue_type || 'other'
+          acc[t] = acc[t] || []
+          acc[t].push(issue)
+          return acc
+        }, {} as Record<string, Issue[]>)
+
+        return (
+          <section key={severity}>
+            <h3 className={`text-sm font-medium mb-3 ${SEVERITY_TEXT[severity]}`}>
+              {SEVERITY_LABEL[severity]} ({bySeverity[severity].length})
+            </h3>
+            <div className="space-y-2">
+              {Object.entries(byType).map(([issueType, issueList]) => (
+                <IssueTypeGroup
+                  key={issueType}
+                  issueType={issueType}
+                  issueList={issueList}
+                  siteId={siteId}
+                  onUpdate={handleUpdate}
+                />
+              ))}
+            </div>
+          </section>
+        )
+      })}
 
       {open.length === 0 && done.length === 0 && (
         <p className="text-gray-500 text-sm">Nenhum issue encontrado. Execute a auditoria técnica primeiro.</p>

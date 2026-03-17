@@ -37,7 +37,18 @@ async def list_audit_issues(
     if severity: q = q.eq("severity", severity)
     if category: q = q.eq("category", category)
     if status:   q = q.eq("status", status)
-    return q.order("created_at", desc=True).execute().data
+    # Fetch all issues in pages of 1000 (PostgREST default limit)
+    all_data = []
+    offset = 0
+    while True:
+        batch = q.order("created_at", desc=True).range(offset, offset + 999).execute().data
+        if not batch:
+            break
+        all_data.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    return all_data
 
 class IssueStatusUpdate(BaseModel):
     status: str
