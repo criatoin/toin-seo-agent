@@ -79,7 +79,7 @@ export default function Conteudo() {
         <div key={b.id} className="bg-gray-900 border border-gray-800 rounded-lg p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-medium text-white">
-              {new Date(b.month).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+              {new Date(b.month + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
             </h3>
             <div className="flex gap-2">
               <button onClick={() => api.patch(`/api/briefings/${b.id}`, { status: 'approved' }).then(loadBriefings)}

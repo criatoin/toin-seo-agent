@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 
 interface Issue {
@@ -313,6 +313,9 @@ export function AuditChecklist({ issues: initialIssues, siteId }: { issues: Issu
   const [issues, setIssues]         = useState(initialIssues)
   const [bulkFixing, setBulkFixing] = useState(false)
   const [bulkMsg, setBulkMsg]       = useState('')
+
+  // Sync internal state when parent reloads data from API
+  useEffect(() => { setIssues(initialIssues) }, [initialIssues])
 
   function handleUpdate(id: string, status: string) {
     setIssues(prev => prev.map(i => i.id === id ? { ...i, status } : i))

@@ -86,7 +86,7 @@ export default function Relatorios() {
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                   selected?.id === r.id ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800'
                 }`}>
-                {new Date(r.period_start).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                {new Date(r.period_start + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
               </button>
             ))}
           </div>

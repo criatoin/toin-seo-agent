@@ -27,7 +27,7 @@ async def list_pages(
     rows = (db.table("pages")
         .select("id,url,title_current,meta_desc_current,gsc_clicks,gsc_position,gsc_ctr,gsc_impressions,needs_meta_opt,has_empty_meta,audit_has_h1,audit_lcp_score,last_synced_at")
         .eq("site_id", site_id)
-        .order("gsc_clicks", desc=True, nulls_last=True)
+        .order("gsc_clicks", desc=True, nullsfirst=False)
         .range(offset, offset + PAGE_SIZE - 1)
         .execute().data)
 
