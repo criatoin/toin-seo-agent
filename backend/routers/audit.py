@@ -107,38 +107,73 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
         except Exception:
             return ""
 
+    from urllib.parse import urlparse
+
     site_name   = site.get("name", "")
+    site_url    = site.get("url", "")
     top_queries = page.get("gsc_top_queries") or []
     queries_str = ""
     if top_queries and isinstance(top_queries, list):
         qs = [q.get("query", q) if isinstance(q, dict) else str(q) for q in top_queries[:5]]
-        queries_str = f"\nPalavras-chave que usuários usam para chegar nesta página: {', '.join(qs)}"
+        queries_str = f"\nPalavras-chave reais que trazem usuários para esta página: {', '.join(qs)}"
+
+    # Detect page type from URL path to give AI better context
+    page_url    = page["url"]
+    parsed_path = urlparse(page_url).path.strip("/")
+    path_parts  = [p for p in parsed_path.split("/") if p]
+    portfolio_slugs = {"projeto", "projetos", "portfolio", "case", "cases",
+                       "trabalho", "trabalhos", "clientes", "cliente"}
+    is_portfolio = bool(path_parts and path_parts[0].lower() in portfolio_slugs)
+
+    if is_portfolio and path_parts:
+        import re as _re
+        raw_slug = path_parts[1] if len(path_parts) > 1 else path_parts[0]
+        client_slug = _re.sub(r"-?\d+$", "", raw_slug).replace("-", " ").title().strip()
+        page_type_context = (
+            f"\nTIPO DE PÁGINA: Página de portfólio/case. "
+            f"Esta é uma página do site de {site_name} apresentando o trabalho realizado "
+            f"para o cliente '{client_slug}'. "
+            f"A descrição deve mencionar que é um projeto/trabalho desenvolvido por esta empresa."
+        )
+    else:
+        page_type_context = ""
 
     # Fetch live content in executor so we don't block the event loop
     loop = asyncio.get_event_loop()
-    page_text = await loop.run_in_executor(None, _fetch_page_text, page["url"])
+    page_text = await loop.run_in_executor(None, _fetch_page_text, page_url)
 
-    content_block = f"\nConteúdo extraído da página:\n{page_text}" if page_text else ""
+    if page_text:
+        content_block = f"\nConteúdo real extraído da página:\n{page_text}"
+        no_content_warning = ""
+    else:
+        content_block = ""
+        no_content_warning = (
+            "\nAVISO: O conteúdo da página não pôde ser extraído (provavelmente site gerado por JavaScript). "
+            "Baseie-se EXCLUSIVAMENTE no título, H1, URL e tipo de página fornecidos. "
+            "NÃO invente características, funcionalidades, serviços ou qualidades que não estejam explícitos nos dados."
+        )
 
     prompt = (
         f"Você é um especialista sênior em SEO com 10 anos de experiência otimizando "
         f"meta descriptions para máximo CTR orgânico.\n\n"
         f"Sua tarefa: escrever a meta description ideal para esta página, com 140-160 caracteres.\n\n"
-        f"Diretrizes profissionais:\n"
-        f"1. Descreva EXATAMENTE o que o usuário vai encontrar — sem inventar\n"
+        f"Diretrizes:\n"
+        f"1. Descreva o que o usuário vai encontrar com base NOS DADOS FORNECIDOS — jamais invente\n"
         f"2. Use a palavra-chave principal no início quando possível\n"
-        f"3. Seja específico: números, detalhes e ações concretas geram mais cliques\n"
-        f"4. Tom: direto e informativo — NÃO use linguagem de propaganda\n"
-        f"5. PROIBIDO: 'Conheça', 'Descubra', 'Acesse', 'Veja mais', 'Clique aqui'\n"
-        f"6. PROIBIDO: mencionar o nome da agência/site se não for relevante para o usuário\n"
-        f"7. Escreva em português (pt-BR)\n\n"
+        f"3. Tom: direto e informativo\n"
+        f"4. PROIBIDO: 'Conheça', 'Descubra', 'Acesse', 'Veja mais', 'Clique aqui'\n"
+        f"5. Escreva em português (pt-BR)\n"
+        f"6. Se os dados forem insuficientes para uma descrição específica, escreva algo genérico "
+        f"e honesto baseado no título — NÃO fabrique detalhes\n\n"
         f"Dados da página:\n"
-        f"Site: {site_name}\n"
-        f"URL: {page['url']}\n"
+        f"Site: {site_name} ({site_url})\n"
+        f"URL: {page_url}\n"
         f"Título: {page.get('title_current', '')}\n"
         f"H1: {page.get('h1_current', '')}"
+        f"{page_type_context}"
         f"{queries_str}"
-        f"{content_block}\n\n"
+        f"{content_block}"
+        f"{no_content_warning}\n\n"
         f"Retorne APENAS o texto da meta description. Sem aspas, sem explicações, sem prefixos."
     )
 
