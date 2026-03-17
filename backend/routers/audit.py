@@ -91,11 +91,25 @@ async def preview_fix(site_id: str, issue_id: str, user=Depends(require_user)):
             if not r.ok:
                 return ""
             soup = BeautifulSoup(r.text, "html.parser")
-            # Remove noise
+            # Remove structural noise and third-party widgets
             for tag in soup(["script", "style", "nav", "header", "footer",
-                              "aside", "form", "noscript", "iframe"]):
+                              "aside", "form", "noscript", "iframe", "svg"]):
                 tag.decompose()
-            # Collect headings and paragraphs
+            # Remove hidden elements (display:none / visibility:hidden)
+            for tag in soup.find_all(style=True):
+                s = tag.get("style", "")
+                if "display:none" in s.replace(" ", "") or "visibility:hidden" in s.replace(" ", ""):
+                    tag.decompose()
+            # Remove known accessibility plugin containers (AccessiWay, EqualWeb, etc.)
+            for tag in soup.find_all(class_=True):
+                classes = " ".join(tag.get("class", []))
+                if any(cls in classes for cls in ("ap-", "accessib", "wcag-", "equalweb",
+                                                   "userway", "audioeye", "reciteme")):
+                    tag.decompose()
+            # Remove aria-hidden elements (screen-reader-only or decorative)
+            for tag in soup.find_all(attrs={"aria-hidden": "true"}):
+                tag.decompose()
+            # Collect headings and paragraphs with meaningful text
             chunks = []
             for tag in soup.find_all(["h1", "h2", "h3", "p"]):
                 text = tag.get_text(" ", strip=True)
