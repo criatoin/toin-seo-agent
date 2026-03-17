@@ -3,6 +3,17 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 
+def normalize_url(base_url: str, href: str) -> str | None:
+    """Resolve relative href to absolute URL and normalizes (removes fragment, trailing slash)."""
+    if not href or href.startswith(('#', 'mailto:', 'tel:', 'javascript:')):
+        return None
+    absolute = urljoin(base_url, href)
+    parsed = urlparse(absolute)
+    if not parsed.scheme.startswith('http'):
+        return None
+    path = parsed.path.rstrip('/') or '/'
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
+
 def _fetch_sitemap_urls(sitemap_url: str, depth: int = 0) -> list[str]:
     """Fetch URLs from a single sitemap URL (handles both index and urlset)."""
     if depth > 3:
@@ -58,7 +69,6 @@ def crawl_page(url: str) -> dict:
         h1s      = soup.find_all("h1")
         canonical = soup.find("link", attrs={"rel": "canonical"})
         images   = soup.find_all("img")
-        links    = [a.get("href") for a in soup.find_all("a", href=True)]
 
         return {
             "url":           url,
@@ -69,8 +79,18 @@ def crawl_page(url: str) -> dict:
             "canonical":     canonical.get("href") if canonical else "",
             "images_total":  len(images),
             "images_no_alt": sum(1 for img in images if not img.get("alt")),
-            "internal_links": [l for l in links if urlparse(l).netloc in ("", urlparse(url).netloc)],
-            "external_links": [l for l in links if urlparse(l).netloc not in ("", urlparse(url).netloc)],
+            "internal_links": list(filter(None, [
+                normalize_url(url, a.get("href"))
+                for a in soup.find_all("a", href=True)
+                if normalize_url(url, a.get("href")) and
+                   urlparse(normalize_url(url, a.get("href"))).netloc == urlparse(url).netloc
+            ])),
+            "external_links": list(filter(None, [
+                normalize_url(url, a.get("href"))
+                for a in soup.find_all("a", href=True)
+                if normalize_url(url, a.get("href")) and
+                   urlparse(normalize_url(url, a.get("href"))).netloc != urlparse(url).netloc
+            ])),
         }
     except Exception as e:
         return {"url": url, "error": str(e)}
