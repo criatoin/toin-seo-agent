@@ -11,6 +11,12 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        toin: {
+          yellow: '#FFC533',
+          purple: '#6010C6',
+          'purple-dark': '#4a0d99',
+          'purple-light': '#7a1ff0',
+        },
       },
     },
   },

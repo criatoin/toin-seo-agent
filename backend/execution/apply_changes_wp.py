@@ -77,27 +77,47 @@ def apply_safe_routines(site_id: str):
     cfg = db.table("settings").select("*").eq("site_id", site_id).single().execute().data or {}
 
     if cfg.get("auto_fill_empty_meta", True):
-        pages = db.table("pages").select("*").eq("site_id", site_id).eq("has_empty_meta", True).execute().data
-        for page in pages:
-            if not page.get("post_id"):
-                continue
-            prompt = f"Write a compelling 150-160 character meta description for this page:\nURL: {page['url']}\nTitle: {page.get('title_current','')}\nH1: {page.get('h1_current','')}\n\nReturn only the meta description text, nothing else."
-            meta_desc = complete(prompt)[:160]
-
-            log(site_id, "apply-safe-routines", "write_meta", "started", payload={"post_id": page["post_id"]})
-            r = requests.post(
-                f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/meta",
-                headers=_wp_headers(site),
-                json={"description": meta_desc, "seo_plugin": site["seo_plugin"]},
-                timeout=10
+        pages = [p for p in db.table("pages").select("*").eq("site_id", site_id).eq("has_empty_meta", True).execute().data if p.get("post_id")]
+        if pages:
+            # Batch: generate all descriptions in ONE AI call instead of N calls
+            items_block = "\n".join(
+                f'{i+1}. URL: {p["url"]} | Título: {p.get("title_current","") or ""} | H1: {p.get("h1_current","") or ""}'
+                for i, p in enumerate(pages)
             )
-            if r.ok:
-                now = datetime.now(timezone.utc).isoformat()
-                db.table("pages").update({"meta_desc_current": meta_desc, "has_empty_meta": False}).eq("id", page["id"]).execute()
-                db.table("audit_issues").update({"status": "fixed", "fixed_at": now}).eq("page_id", page["id"]).eq("issue_type", "missing_meta_desc").in_("status", ["open", "in_progress"]).execute()
-                log(site_id, "apply-safe-routines", "write_meta", "success")
-            else:
-                log(site_id, "apply-safe-routines", "write_meta", "error", error=r.text)
+            batch_prompt = (
+                "Você é especialista em SEO. Gere meta descriptions em português para as páginas abaixo.\n"
+                "Regras: máximo 155 caracteres, focada em benefício, sem aspas, uma por linha.\n"
+                "Retorne APENAS as descriptions numeradas, uma por linha, sem texto extra.\n\n"
+                f"{items_block}"
+            )
+            try:
+                raw = complete(batch_prompt, max_tokens=200 * len(pages))
+                lines = [l.strip() for l in raw.strip().splitlines() if l.strip()]
+                # Strip leading "1. " "2. " etc
+                import re as _re
+                descriptions = [_re.sub(r'^\d+\.\s*', '', l)[:160] for l in lines]
+            except Exception as e:
+                log(site_id, "apply-safe-routines", "batch_meta", "error", error=str(e))
+                descriptions = []
+
+            now = datetime.now(timezone.utc).isoformat()
+            for i, page in enumerate(pages):
+                meta_desc = descriptions[i] if i < len(descriptions) else ""
+                if not meta_desc:
+                    continue
+                log(site_id, "apply-safe-routines", "write_meta", "started", payload={"post_id": page["post_id"]})
+                r = requests.post(
+                    f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/meta",
+                    headers=_wp_headers(site),
+                    json={"description": meta_desc, "seo_plugin": site["seo_plugin"]},
+                    timeout=10
+                )
+                if r.ok:
+                    db.table("pages").update({"meta_desc_current": meta_desc, "has_empty_meta": False}).eq("id", page["id"]).execute()
+                    db.table("audit_issues").update({"status": "fixed", "fixed_at": now}).eq("page_id", page["id"]).eq("issue_type", "missing_meta_desc").in_("status", ["open", "in_progress"]).execute()
+                else:
+                    log(site_id, "apply-safe-routines", "write_meta", "error", error=r.text)
+            log(site_id, "apply-safe-routines", "batch_meta", "success", payload={"total": len(pages), "generated": len(descriptions)})
 
 def run(site_id: str):
     apply_safe_routines(site_id)

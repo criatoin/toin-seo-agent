@@ -27,8 +27,6 @@ async def list_pages(
     if sort_by not in SORT_FIELDS:
         sort_by = "gsc_clicks"
     desc = sort_dir != "asc"
-    # nulls go last always (pages without GSC data sink to the bottom)
-    nullsfirst_val = False if desc else True
 
     # Total count
     count_res = db.table("pages").select("id", count="exact").eq("site_id", site_id).execute()
@@ -41,7 +39,8 @@ async def list_pages(
     rows = (db.table("pages")
         .select("id,url,title_current,meta_desc_current,gsc_clicks,gsc_position,gsc_ctr,gsc_impressions,needs_meta_opt,has_empty_meta,audit_has_h1,audit_lcp_score,last_synced_at")
         .eq("site_id", site_id)
-        .order(sort_by, desc=desc, nullsfirst=nullsfirst_val)
+        .order(sort_by, desc=desc)
+        .order("url", desc=False)
         .range(offset, offset + PAGE_SIZE - 1)
         .execute().data)
 

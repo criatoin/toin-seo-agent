@@ -100,6 +100,30 @@ const INP_GUIDANCE: { label: string; detail: string; priority: 'alta' | 'média'
 
 const PRIORITY_COLOR = { alta: 'text-red-400', média: 'text-yellow-400' }
 
+function RobotsGuidance() {
+  return (
+    <div className="mt-3 p-3 bg-gray-800/60 rounded-lg border border-gray-700 space-y-3">
+      <p className="text-xs font-medium text-gray-300">O que está acontecendo?</p>
+      <p className="text-xs text-gray-400 leading-relaxed">
+        O arquivo <strong className="text-white">robots.txt</strong> é um arquivo no seu site que diz ao Google quais páginas ele pode ou não visitar.
+        O problema detectado é que algumas páginas do seu site estão marcadas como <strong className="text-red-400">bloqueadas</strong> — ou seja, o Google não consegue nem ler essas páginas, então elas não aparecem no Google.
+      </p>
+      <div className="border border-gray-700 rounded p-2.5 space-y-1">
+        <p className="text-xs font-semibold text-white">Como resolver no WordPress:</p>
+        <ol className="text-xs text-gray-400 space-y-1 list-decimal list-inside leading-relaxed">
+          <li>No painel WordPress, vá em <strong className="text-gray-200">Yoast SEO → Ferramentas → Editor de arquivo</strong></li>
+          <li>Procure por linhas que começam com <code className="text-yellow-400 bg-gray-900 px-1 rounded">Disallow:</code></li>
+          <li>Se tiver <code className="text-yellow-400 bg-gray-900 px-1 rounded">Disallow: /</code> (barra sozinha) — isso bloqueia <strong className="text-red-400">TODO o site</strong>. Troque por <code className="text-green-400 bg-gray-900 px-1 rounded">Disallow:</code> (sem nada depois)</li>
+          <li>Salve o arquivo e clique em "Atualizar" aqui para revalidar</li>
+        </ol>
+      </div>
+      <p className="text-xs text-gray-500">
+        Se não usa Yoast: <strong className="text-gray-400">Configurações → Leitura</strong> e desmarque "Solicitar que os mecanismos de busca não indexem este site".
+      </p>
+    </div>
+  )
+}
+
 function SpeedGuidance({ issue_type }: { issue_type: string }) {
   const metric = issue_type.split('_')[0]
   const guidance = metric === 'lcp' ? LCP_GUIDANCE : metric === 'cls' ? CLS_GUIDANCE : INP_GUIDANCE
@@ -146,6 +170,7 @@ function IssueCard({
   const isMetaIssue   = issue.issue_type === 'missing_meta_desc'
   const isAltIssue    = issue.issue_type === 'images_no_alt'
   const isSpeedIssue  = issue.category === 'speed'
+  const isRobotsIssue = issue.issue_type === 'robots_blocking_pages'
 
   async function changeStatus(status: string) {
     setLoading(true)
@@ -232,8 +257,8 @@ function IssueCard({
             )}
           </div>
 
-          {/* Speed guidance expandable */}
-          {isSpeedIssue && !isActioned && (
+          {/* Speed / robots guidance expandable */}
+          {(isSpeedIssue || isRobotsIssue) && !isActioned && (
             <button
               onClick={() => setShowSpeed(v => !v)}
               className="mt-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
@@ -241,6 +266,7 @@ function IssueCard({
             </button>
           )}
           {showSpeed && isSpeedIssue && <SpeedGuidance issue_type={issue.issue_type} />}
+          {showSpeed && isRobotsIssue && <RobotsGuidance />}
 
           {/* Meta description preview inline */}
           {preview !== null && !isActioned && (
