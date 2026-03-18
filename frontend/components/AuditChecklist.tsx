@@ -476,18 +476,36 @@ function IssueTypeGroup({
 
   return (
     <div className="border border-gray-800 rounded-lg overflow-hidden">
-      {/* Group header — click to expand */}
-      <button
-        onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center gap-2 px-4 py-3 bg-gray-900 text-left hover:bg-gray-800/60 transition-colors">
-        <span className="text-xs text-gray-500 shrink-0">{expanded ? '▼' : '▶'}</span>
-        <span className="text-sm font-medium text-white truncate flex-1">{label}</span>
-        <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded shrink-0">
-          {issueList.length}
-        </span>
-      </button>
+      {/* Group header */}
+      <div className="flex items-center gap-2 px-4 py-3 bg-gray-900">
+        {/* Expand toggle */}
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center gap-2 flex-1 text-left hover:opacity-80 transition-opacity min-w-0">
+          <span className="text-xs text-gray-500 shrink-0">{expanded ? '▼' : '▶'}</span>
+          <span className="text-sm font-medium text-white truncate">{label}</span>
+          <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded shrink-0">
+            {issueList.length}
+          </span>
+        </button>
 
-      {/* Issues list + bulk actions */}
+        {/* Bulk fix button — always visible in header */}
+        {canBulkFix && issueList.length > 1 && (
+          <div className="flex items-center gap-2 shrink-0">
+            {fixMsg && (
+              <span className="text-xs text-indigo-400 max-w-[180px] text-right leading-tight">{fixMsg}</span>
+            )}
+            <button
+              onClick={bulkFix}
+              disabled={fixing || bulking}
+              className="text-xs px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded disabled:opacity-50 transition-colors whitespace-nowrap">
+              {fixing ? 'Corrigindo...' : `⚡ Corrigir todas (${issueList.length})`}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Issues list + mark-done bulk actions */}
       {expanded && (
         <div className="divide-y divide-gray-800/60">
           {(issueList.length > COLLAPSE_THRESHOLD
@@ -499,7 +517,6 @@ function IssueTypeGroup({
             </div>
           ))}
 
-          {/* Bulk actions bar — always visible when expanded and multiple items */}
           {issueList.length > 1 && (
             <div className="px-4 py-3 bg-gray-900/60 border-t border-gray-800 flex items-center justify-between gap-3 flex-wrap">
               {issueList.length > COLLAPSE_THRESHOLD && (
@@ -508,23 +525,11 @@ function IssueTypeGroup({
                 </p>
               )}
               <div className="flex items-center gap-2 ml-auto flex-wrap">
-                {fixMsg && (
-                  <span className="text-xs text-indigo-400 max-w-xs text-right">{fixMsg}</span>
-                )}
-                {canBulkFix && (
-                  <button
-                    onClick={bulkFix}
-                    disabled={fixing || bulking}
-                    className="text-xs px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded disabled:opacity-50 transition-colors">
-                    {fixing ? 'Corrigindo...' : `⚡ Corrigir todas (${issueList.length})`}
-                  </button>
-                )}
-                <span className="text-xs text-gray-600">|</span>
                 <button
                   onClick={() => bulkAction('fixed')}
                   disabled={bulking || fixing}
                   className="text-xs px-3 py-1.5 bg-green-800 hover:bg-green-700 text-green-200 rounded disabled:opacity-50 transition-colors">
-                  {bulking ? '...' : '✓ Marcar resolvidas'}
+                  {bulking ? '...' : '✓ Marcar todas resolvidas'}
                 </button>
                 <button
                   onClick={() => bulkAction('dismissed')}
