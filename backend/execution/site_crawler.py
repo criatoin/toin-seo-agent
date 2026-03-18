@@ -60,6 +60,7 @@ def crawl_sitemap(site_url: str) -> list[str]:
 
 def crawl_page(url: str) -> dict:
     """Crawl a single page and return SEO-relevant data."""
+    import json as _json
     try:
         r   = requests.get(url, timeout=10, headers={"User-Agent": "TOINSEOBot/1.0"})
         soup = BeautifulSoup(r.text, "html.parser")
@@ -70,6 +71,17 @@ def crawl_page(url: str) -> dict:
         canonical = soup.find("link", attrs={"rel": "canonical"})
         images   = soup.find_all("img")
 
+        # Extract first JSON-LD schema block
+        schema = None
+        for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+            try:
+                text = script.string
+                if text:
+                    schema = _json.loads(text.strip())
+                    break
+            except Exception:
+                pass
+
         return {
             "url":           url,
             "status_code":   r.status_code,
@@ -77,6 +89,7 @@ def crawl_page(url: str) -> dict:
             "meta_desc":     desc_tag.get("content", "") if desc_tag else "",
             "h1s":           [h.get_text(strip=True) for h in h1s],
             "canonical":     canonical.get("href") if canonical else "",
+            "schema":        schema,
             "images_total":  len(images),
             "images_no_alt": sum(1 for img in images if not img.get("alt")),
             "internal_links": list(filter(None, [

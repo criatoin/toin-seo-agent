@@ -52,9 +52,9 @@ def run(site_id: str):
     site_url = site["url"]
     log(site_id, "technical-audit", "start_audit", "started")
 
-    # Clear stale pages and open issues — fresh crawl every time
-    db.table("audit_issues").delete().eq("site_id", site_id).eq("status", "open").execute()
-    db.table("pages").delete().eq("site_id", site_id).execute()
+    # Clear only open/in_progress issues — keep fixed/dismissed history
+    # Do NOT delete pages: preserves post_id, gsc_* data, and issue history across audits
+    db.table("audit_issues").delete().eq("site_id", site_id).in_("status", ["open", "in_progress"]).execute()
 
     urls = crawl_sitemap(site["url"])
     if not urls:
@@ -80,6 +80,7 @@ def run(site_id: str):
         # Get or create page record
         existing = db.table("pages").select("id").eq("site_id", site_id).eq("url", url).execute().data
         schema_current = crawl.get("schema")
+        has_meta       = bool(crawl["meta_desc"])
         page_data = {
             "site_id":     site_id, "url": url,
             "title_current":     crawl["title"],
@@ -88,6 +89,7 @@ def run(site_id: str):
             "canonical_current": crawl["canonical"],
             "audit_has_h1":      len(crawl["h1s"]) == 1,
             "audit_canonical_ok": bool(crawl["canonical"]),
+            "has_empty_meta":    not has_meta,
             "schema_current":    schema_current,
             "needs_schema_opt":  schema_current is None,
         }
@@ -123,8 +125,7 @@ def run(site_id: str):
         seen_titles[crawl["title"]] = url
 
         # Meta description
-        if not crawl["meta_desc"]:
-            db.table("pages").update({"has_empty_meta": True}).eq("id", page_id).execute()
+        if not has_meta:
             _add_issue(db, site_id, page_id, "important", "onpage", "missing_meta_desc",
                 f"Meta description ausente: {url}", "Adicione uma meta description única", auto_fixable=True)
         elif crawl["meta_desc"] in seen_descs:
