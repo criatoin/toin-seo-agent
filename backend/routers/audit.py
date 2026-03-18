@@ -398,6 +398,56 @@ async def apply_fix(site_id: str, issue_id: str, body: ApplyFixBody, user=Depend
     return {"fixed": True, "description": body.description}
 
 
+@router.get("/{site_id}/audit/diagnose")
+async def diagnose(site_id: str, user=Depends(require_user)):
+    """Check WP connectivity, post_id coverage, and last job logs."""
+    import base64 as _b64
+    import requests as _req
+    db = get_db()
+
+    site = db.table("sites").select("url,type,wp_user,wp_app_password").eq("id", site_id).single().execute().data
+    has_credentials = bool(site and site.get("wp_user") and site.get("wp_app_password"))
+
+    # Count pages with/without post_id
+    total_res    = db.table("pages").select("id", count="exact").eq("site_id", site_id).execute()
+    with_res     = db.table("pages").select("id", count="exact").eq("site_id", site_id).not_.is_("post_id", "null").execute()
+    schema_res   = db.table("pages").select("id", count="exact").eq("site_id", site_id).eq("needs_schema_opt", True).execute()
+    total        = total_res.count or 0
+    with_post_id = with_res.count or 0
+    needs_schema = schema_res.count or 0
+
+    # Test WP connectivity
+    wp_ok    = False
+    wp_error = None
+    if has_credentials and site:
+        try:
+            creds = _b64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
+            r = _req.get(
+                f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/status",
+                headers={"Authorization": f"Basic {creds}"},
+                timeout=8
+            )
+            wp_ok    = r.ok
+            wp_error = None if r.ok else f"HTTP {r.status_code}: {r.text[:100]}"
+        except Exception as e:
+            wp_error = str(e)
+
+    # Last 10 execution logs
+    logs_res = db.table("execution_logs").select("job_name,action,status,error_message,created_at").eq("site_id", site_id).order("created_at", desc=True).limit(10).execute()
+
+    return {
+        "has_credentials": has_credentials,
+        "wp_ok":           wp_ok,
+        "wp_error":        wp_error,
+        "pages_total":     total,
+        "with_post_id":    with_post_id,
+        "without_post_id": total - with_post_id,
+        "needs_schema":    needs_schema,
+        "needs_audit":     (total > 0 and with_post_id == 0 and has_credentials),
+        "last_logs":       logs_res.data or [],
+    }
+
+
 @router.post("/{site_id}/audit/fix-all-auto")
 async def fix_all_auto(site_id: str, user=Depends(require_user)):
     """Mark all open auto-fixable issues as in_progress (bulk trigger)."""
