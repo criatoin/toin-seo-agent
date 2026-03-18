@@ -139,9 +139,10 @@ class TOIN_SEO_REST_API {
             return new WP_REST_Response(['error' => 'Post not found'], 404);
         }
 
-        $plugin = sanitize_text_field(
-            $request->get_param('seo_plugin') ?? TOIN_SEO_Plugins::detect()
-        );
+        $plugin_param = sanitize_text_field((string) ($request->get_param('seo_plugin') ?? ''));
+        $plugin = ($plugin_param && $plugin_param !== 'none')
+            ? $plugin_param
+            : TOIN_SEO_Plugins::detect();
         $title  = $request->get_param('title');
         $desc   = $request->get_param('description');
 

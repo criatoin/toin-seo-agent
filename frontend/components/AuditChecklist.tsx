@@ -426,11 +426,18 @@ function IssueTypeGroup({
   siteId: string
   onUpdate: (id: string, status: string) => void
 }) {
-  const [expanded, setExpanded] = useState(issueList.length <= 3)
-  const [bulking, setBulking]   = useState(false)
-  const COLLAPSE_THRESHOLD      = 5
+  const [expanded, setExpanded]   = useState(issueList.length <= 3)
+  const [bulking, setBulking]     = useState(false)
+  const [fixing, setFixing]       = useState(false)
+  const [fixMsg, setFixMsg]       = useState('')
+  const COLLAPSE_THRESHOLD        = 5
 
   const label = ISSUE_TYPE_LABEL[issueType] || issueType
+
+  // Which issue types support actual bulk-fix (not just mark-as-done)
+  const isMetaType  = issueType === 'missing_meta_desc'
+  const isAltType   = issueType === 'images_no_alt'
+  const canBulkFix  = isMetaType || isAltType
 
   async function bulkAction(status: string) {
     setBulking(true)
@@ -444,6 +451,26 @@ function IssueTypeGroup({
       alert('Erro ao atualizar issues em lote')
     } finally {
       setBulking(false)
+    }
+  }
+
+  async function bulkFix() {
+    setFixing(true)
+    setFixMsg('')
+    try {
+      if (isMetaType) {
+        await api.post('/api/jobs/apply-safe-routines', { site_id: siteId })
+        setFixMsg(`Gerando ${issueList.length} meta descriptions em batch. Atualizar em ~1 min.`)
+        issueList.forEach(i => onUpdate(i.id, 'in_progress'))
+      } else if (isAltType) {
+        await api.post('/api/jobs/bulk-fix-images-alt', { site_id: siteId })
+        setFixMsg(`Gerando alt text para ${issueList.length} página(s). Atualizar em ~2 min.`)
+        issueList.forEach(i => onUpdate(i.id, 'in_progress'))
+      }
+    } catch (e: any) {
+      setFixMsg('Erro: ' + (e?.message || 'tente novamente'))
+    } finally {
+      setFixing(false)
     }
   }
 
@@ -480,17 +507,28 @@ function IssueTypeGroup({
                   Mostrando {COLLAPSE_THRESHOLD} de {issueList.length}
                 </p>
               )}
-              <div className="flex items-center gap-2 ml-auto">
-                <span className="text-xs text-gray-500">{issueList.length} itens:</span>
+              <div className="flex items-center gap-2 ml-auto flex-wrap">
+                {fixMsg && (
+                  <span className="text-xs text-indigo-400 max-w-xs text-right">{fixMsg}</span>
+                )}
+                {canBulkFix && (
+                  <button
+                    onClick={bulkFix}
+                    disabled={fixing || bulking}
+                    className="text-xs px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded disabled:opacity-50 transition-colors">
+                    {fixing ? 'Corrigindo...' : `⚡ Corrigir todas (${issueList.length})`}
+                  </button>
+                )}
+                <span className="text-xs text-gray-600">|</span>
                 <button
                   onClick={() => bulkAction('fixed')}
-                  disabled={bulking}
+                  disabled={bulking || fixing}
                   className="text-xs px-3 py-1.5 bg-green-800 hover:bg-green-700 text-green-200 rounded disabled:opacity-50 transition-colors">
-                  {bulking ? '...' : '✓ Marcar todas resolvidas'}
+                  {bulking ? '...' : '✓ Marcar resolvidas'}
                 </button>
                 <button
                   onClick={() => bulkAction('dismissed')}
-                  disabled={bulking}
+                  disabled={bulking || fixing}
                   className="text-xs px-3 py-1.5 border border-gray-700 hover:border-gray-500 text-gray-400 rounded disabled:opacity-50 transition-colors">
                   Ignorar todas
                 </button>

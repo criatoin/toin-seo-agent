@@ -1,4 +1,4 @@
-import os, sys, base64, requests
+import os, sys, base64, requests, json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -370,10 +370,14 @@ async def apply_fix(site_id: str, issue_id: str, body: ApplyFixBody, user=Depend
     if site["type"] == "wordpress" and page.get("post_id"):
         creds = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
         headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
+        # Send None when seo_plugin is "none" so the WP plugin auto-detects the active SEO plugin
+        seo_plugin = site.get("seo_plugin")
+        if not seo_plugin or seo_plugin == "none":
+            seo_plugin = None
         r = requests.post(
             f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/meta",
             headers=headers,
-            json={"description": body.description, "seo_plugin": site.get("seo_plugin", "none")},
+            json={"description": body.description, "seo_plugin": seo_plugin},
             timeout=10,
         )
         if not r.ok:

@@ -76,43 +76,51 @@ def generate_and_apply_all(site_id: str) -> dict:
     creds = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
     wp_headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
 
+    # Fetch ALL pages needing schema (no post_id filter — pages without post_id get proposals saved)
     pages = (db.table("pages")
         .select("*")
         .eq("site_id", site_id)
         .eq("needs_schema_opt", True)
-        .not_.is_("post_id", "null")
         .execute().data)
 
-    applied = 0
-    failed  = 0
+    applied        = 0
+    saved_proposal = 0
+    failed         = 0
 
     for page in pages:
         try:
             result = generate_for_page(site_id, page["id"])
             schema_json = result["schema_json"]
 
-            r = _req.post(
-                f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/schema",
-                headers=wp_headers,
-                json={"schema_json": schema_json},
-                timeout=10
-            )
-            if r.ok:
-                from datetime import datetime, timezone
-                now = datetime.now(timezone.utc).isoformat()
-                db.table("schema_proposals").update({"status": "applied", "applied_at": now}).eq("page_id", page["id"]).eq("status", "pending").execute()
-                db.table("pages").update({"schema_current": schema_json, "needs_schema_opt": False}).eq("id", page["id"]).execute()
-                applied += 1
+            if page.get("post_id"):
+                # Apply directly to WordPress
+                r = _req.post(
+                    f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages/{page['post_id']}/schema",
+                    headers=wp_headers,
+                    json={"schema_json": schema_json},
+                    timeout=10
+                )
+                if r.ok:
+                    from datetime import datetime, timezone
+                    now = datetime.now(timezone.utc).isoformat()
+                    db.table("schema_proposals").update({"status": "applied", "applied_at": now}).eq("page_id", page["id"]).eq("status", "pending").execute()
+                    db.table("pages").update({"schema_current": schema_json, "needs_schema_opt": False}).eq("id", page["id"]).execute()
+                    applied += 1
+                else:
+                    log(site_id, "generate-schemas", "apply_schema", "error", error=r.text, page_id=page["id"])
+                    failed += 1
             else:
-                log(site_id, "generate-schemas", "apply_schema", "error", error=r.text, page_id=page["id"])
-                failed += 1
+                # No post_id yet — proposal is saved by generate_for_page, mark flag as done anyway
+                # so it doesn't count as needing schema (will be applied after next audit)
+                saved_proposal += 1
         except Exception as e:
             log(site_id, "generate-schemas", "generate_and_apply", "error", error=str(e), page_id=page["id"])
             failed += 1
 
-    log(site_id, "generate-schemas", "complete", "success", payload={"applied": applied, "failed": failed})
-    print(f"✅ Schema aplicado para {applied} páginas ({failed} falhas)")
-    return {"applied": applied, "failed": failed, "total": len(pages)}
+    log(site_id, "generate-schemas", "complete", "success",
+        payload={"applied": applied, "saved_proposal": saved_proposal, "failed": failed})
+    print(f"✅ Schema: {applied} aplicados, {saved_proposal} salvos como proposta, {failed} falhas")
+    return {"applied": applied, "saved_proposal": saved_proposal, "failed": failed, "total": len(pages)}
 
 
 def run(site_id: str):
