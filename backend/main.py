@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from routers import sites, audit, pages, proposals, alerts, briefings, jobs, reports, settings, gsc, dashboard
+from routers import sites, audit, pages, proposals, alerts, briefings, jobs, reports, settings, gsc, dashboard, logs
 from scheduler import create_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +48,7 @@ app.include_router(jobs.router,      prefix="/api/jobs",      tags=["jobs"])
 app.include_router(reports.router,   prefix="/api/reports",   tags=["reports"])
 app.include_router(settings.router,  prefix="/api/settings",  tags=["settings"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(logs.router,     prefix="/api/sites",     tags=["logs"])
 
 
 @app.get("/health")

@@ -1,18 +1,16 @@
 """Applies approved meta/schema proposals to WordPress sites."""
-import os, requests, base64
+import requests, base64
 from datetime import datetime, timezone
 from supabase_client import get_db, log
 from deepseek_client import complete
 from dotenv import load_dotenv
 load_dotenv()
 
-ALLOWED_SITES = [s.strip() for s in os.environ.get("GSC_ALLOWED_SITES", "").split(",")]
-
 def _validate_site(site: dict):
-    if site["url"] not in ALLOWED_SITES:
-        raise PermissionError(f"Site {site['url']} not in GSC_ALLOWED_SITES")
     if site["type"] != "wordpress":
         raise PermissionError("Only WordPress sites supported for writes")
+    if not site.get("wp_user") or not site.get("wp_app_password"):
+        raise PermissionError(f"WordPress credentials not configured for site {site['url']}")
 
 def _wp_headers(site: dict) -> dict:
     creds = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()

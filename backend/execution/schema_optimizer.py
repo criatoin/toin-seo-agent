@@ -110,8 +110,9 @@ def generate_and_apply_all(site_id: str) -> dict:
                     log(site_id, "generate-schemas", "apply_schema", "error", error=r.text, page_id=page["id"])
                     failed += 1
             else:
-                # No post_id yet — proposal is saved by generate_for_page, mark flag as done anyway
-                # so it doesn't count as needing schema (will be applied after next audit)
+                # No post_id — proposal saved by generate_for_page above.
+                # Clear flag so counter decreases and user sees progress.
+                db.table("pages").update({"needs_schema_opt": False}).eq("id", page["id"]).execute()
                 saved_proposal += 1
         except Exception as e:
             log(site_id, "generate-schemas", "generate_and_apply", "error", error=str(e), page_id=page["id"])
