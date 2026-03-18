@@ -320,8 +320,12 @@ async def apply_images_alt(site_id: str, issue_id: str, body: ApplyImagesAltBody
     page = page_res.data[0]
     site = site_res.data[0]
 
-    if site["type"] != "wordpress" or not page.get("post_id"):
+    if site["type"] != "wordpress":
         raise HTTPException(400, "Alt text fix only available for WordPress sites")
+    if not page.get("post_id"):
+        raise HTTPException(400,
+            "Página não vinculada ao WordPress. "
+            "Execute 'Rodar Auditoria' primeiro para vincular as páginas ao WordPress.")
 
     creds   = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
     headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
@@ -366,11 +370,14 @@ async def apply_fix(site_id: str, issue_id: str, body: ApplyFixBody, user=Depend
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # For WordPress sites: write via plugin
-    if site["type"] == "wordpress" and page.get("post_id"):
+    # For WordPress sites: write via plugin — fail loudly if page has no post_id
+    if site["type"] == "wordpress":
+        if not page.get("post_id"):
+            raise HTTPException(400,
+                "Página não vinculada ao WordPress. "
+                "Execute 'Rodar Auditoria' primeiro para vincular as páginas ao WordPress.")
         creds = base64.b64encode(f"{site['wp_user']}:{site['wp_app_password']}".encode()).decode()
         headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
-        # Send None when seo_plugin is "none" so the WP plugin auto-detects the active SEO plugin
         seo_plugin = site.get("seo_plugin")
         if not seo_plugin or seo_plugin == "none":
             seo_plugin = None
@@ -454,7 +461,7 @@ async def diagnose(site_id: str, user=Depends(require_user)):
         "with_post_id":    with_post_id,
         "without_post_id": total - with_post_id,
         "needs_schema":    needs_schema,
-        "needs_audit":     (total > 0 and with_post_id == 0 and has_credentials),
+        "needs_audit":     (total > 10 and has_credentials and with_post_id < total * 0.8),
         "last_logs":       logs_res.data or [],
         "gsc_last_sync":   gsc_last,
     }
