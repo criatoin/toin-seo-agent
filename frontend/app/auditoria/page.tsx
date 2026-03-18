@@ -96,6 +96,38 @@ function DiagnosticPanel({ siteId }: { siteId: string }) {
                   {diag.with_post_id === 0 && !diag.has_credentials && (
                     <p className="text-xs text-gray-400 mt-0.5">Configure as credenciais WP primeiro.</p>
                   )}
+                  {diag.with_post_id > 0 && diag.without_post_id > 0 && !diag.needs_audit && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {diag.without_post_id} sem vínculo (archives, taxonomias ou tipos de post customizados sem plugin suporte) — não afetam correções automáticas.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* GSC sync status */}
+              <div className="flex items-start gap-3">
+                <span className={`text-sm mt-0.5 ${
+                  !diag.gsc_last_sync ? 'text-gray-500' :
+                  diag.gsc_last_sync.status === 'success' ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {!diag.gsc_last_sync ? '·' : diag.gsc_last_sync.status === 'success' ? '✓' : '✗'}
+                </span>
+                <div>
+                  <p className="text-sm text-white">Sync Google Search Console</p>
+                  {!diag.gsc_last_sync && (
+                    <p className="text-xs text-gray-400 mt-0.5">Nunca sincronizado. Clique em "Sincronizar GSC" para popular os dados.</p>
+                  )}
+                  {diag.gsc_last_sync?.status === 'success' && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Última sync: {new Date(diag.gsc_last_sync.created_at).toLocaleString('pt-BR')}
+                      {diag.gsc_last_sync.payload?.rows_synced != null && ` · ${diag.gsc_last_sync.payload.rows_synced} páginas`}
+                    </p>
+                  )}
+                  {diag.gsc_last_sync?.status === 'error' && (
+                    <p className="text-xs text-red-400 mt-0.5">
+                      Erro: {diag.gsc_last_sync.error_message || 'verifique os logs abaixo'}
+                    </p>
+                  )}
                 </div>
               </div>
 

@@ -38,12 +38,23 @@ def _get_credentials() -> Credentials:
     return creds
 
 
+def _domain_of(url: str) -> str:
+    """Extract bare domain from URL or sc-domain: property."""
+    if url.startswith("sc-domain:"):
+        return url[len("sc-domain:"):].lower().strip().lstrip("www.")
+    from urllib.parse import urlparse
+    return urlparse(url).netloc.lower().strip().lstrip("www.")
+
 def _validate_site_url(site_url: str) -> None:
-    allowed = [s.strip() for s in os.environ.get("GSC_ALLOWED_SITES", "").split(",") if s.strip()]
-    if site_url not in allowed:
+    allowed_raw = os.environ.get("GSC_ALLOWED_SITES", "").strip()
+    if not allowed_raw or allowed_raw == "*":
+        return  # no restriction configured
+    allowed_domains = {_domain_of(s) for s in allowed_raw.split(",") if s.strip()}
+    site_domain = _domain_of(site_url)
+    if site_domain not in allowed_domains:
         raise PermissionError(
-            f"Site '{site_url}' is not in GSC_ALLOWED_SITES. "
-            f"Allowed: {allowed}"
+            f"Site domain '{site_domain}' is not in GSC_ALLOWED_SITES. "
+            f"Allowed domains: {allowed_domains}"
         )
 
 
@@ -63,8 +74,21 @@ def fetch_site_data(site_url: str, days: int = 90) -> list[dict]:
         "dimensions": ["page"],
         "rowLimit":   1000,
     }
-    response = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
-    return response.get("rows", [])
+
+    # GSC siteUrl must exactly match the registered property.
+    # Try the URL as-is first, then with trailing slash added (URL-prefix properties often need it).
+    candidates = [site_url]
+    if not site_url.endswith("/") and not site_url.startswith("sc-domain:"):
+        candidates.append(site_url + "/")
+
+    last_error = None
+    for candidate in candidates:
+        try:
+            response = service.searchanalytics().query(siteUrl=candidate, body=body).execute()
+            return response.get("rows", [])
+        except Exception as e:
+            last_error = e
+    raise last_error
 
 
 def run(site_id: str) -> None:
@@ -82,6 +106,14 @@ def run(site_id: str) -> None:
         log(site_id, "sync-gsc", "fetch_gsc_data", "error", error=str(e))
         raise
 
+    # Build normalized URL index of all existing pages for this site (avoids N queries)
+    all_pages_res = db.table("pages").select("id,url").eq("site_id", site_id).execute()
+    norm_to_id: dict[str, str] = {}
+    url_to_id:  dict[str, str] = {}
+    for p in (all_pages_res.data or []):
+        url_to_id[p["url"]] = p["id"]
+        norm_to_id[_domain_of(p["url"]) + "/" + p["url"].split("//", 1)[-1].split("/", 1)[-1].rstrip("/")] = p["id"]
+
     updated = 0
     for row in rows:
         url         = row["keys"][0]
@@ -97,9 +129,15 @@ def run(site_id: str) -> None:
             "gsc_position":    position,
             "last_synced_at":  datetime.now().isoformat(),
         }
-        existing = db.table("pages").select("id").eq("site_id", site_id).eq("url", url).execute().data
-        if existing:
-            db.table("pages").update(page_data).eq("id", existing[0]["id"]).execute()
+
+        # Try exact match first, then normalized (strips protocol/www/trailing-slash differences)
+        page_id = url_to_id.get(url)
+        if not page_id:
+            norm_key = _domain_of(url) + "/" + url.split("//", 1)[-1].split("/", 1)[-1].rstrip("/")
+            page_id = norm_to_id.get(norm_key)
+
+        if page_id:
+            db.table("pages").update(page_data).eq("id", page_id).execute()
         else:
             db.table("pages").insert({"site_id": site_id, "url": url, **page_data}).execute()
         updated += 1

@@ -403,6 +403,7 @@ function IssueCard({
 
 const ISSUE_TYPE_LABEL: Record<string, string> = {
   orphan_page:           'Páginas Órfãs',
+  missing_title:         'Título ausente',
   missing_meta_desc:     'Meta description ausente',
   missing_h1:            'H1 ausente',
   multiple_h1:           'Múltiplos H1',

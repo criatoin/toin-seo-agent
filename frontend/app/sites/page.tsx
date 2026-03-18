@@ -6,6 +6,7 @@ function SiteCard({ site, onUpdated }: { site: any; onUpdated: (s: any) => void 
   const [editing, setEditing]   = useState(false)
   const [wpUser, setWpUser]     = useState(site.wp_user || '')
   const [wpPass, setWpPass]     = useState('')
+  const [gscUrl, setGscUrl]     = useState(site.gsc_site_url || '')
   const [saving, setSaving]     = useState(false)
   const [msg, setMsg]           = useState('')
 
@@ -14,14 +15,13 @@ function SiteCard({ site, onUpdated }: { site: any; onUpdated: (s: any) => void 
     setSaving(true)
     setMsg('')
     try {
-      const updated = await api.patch(`/api/sites/${site.id}`, {
-        wp_user: wpUser,
-        wp_app_password: wpPass,
-      })
+      const payload: any = { wp_user: wpUser, wp_app_password: wpPass }
+      if (gscUrl !== (site.gsc_site_url || '')) payload.gsc_site_url = gscUrl || null
+      const updated = await api.patch(`/api/sites/${site.id}`, payload)
       onUpdated(updated)
       setEditing(false)
       setWpPass('')
-      setMsg('Credenciais salvas!')
+      setMsg('Salvo!')
     } catch {
       setMsg('Erro ao salvar. Tente novamente.')
     } finally {
@@ -93,6 +93,20 @@ function SiteCard({ site, onUpdated }: { site: any; onUpdated: (s: any) => void 
                 />
                 <p className="text-xs text-gray-600 mt-1">
                   WP Admin → Usuários → Perfil → Application Passwords
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  URL no Google Search Console <span className="text-gray-600">(opcional)</span>
+                </label>
+                <input
+                  value={gscUrl}
+                  onChange={e => setGscUrl(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  placeholder="https://criatoin.com.br/ ou sc-domain:criatoin.com.br"
+                />
+                <p className="text-xs text-gray-600 mt-1">
+                  Deixe em branco para usar a URL do site. Confira o formato exato no GSC → Configurações → Propriedade.
                 </p>
               </div>
               <div className="flex items-center gap-3">

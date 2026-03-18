@@ -14,6 +14,15 @@ def _wp_get_pages(site: dict) -> list[dict]:
     r = requests.get(f"{site['url'].rstrip('/')}/wp-json/toin-seo/v1/pages", headers=headers, timeout=15)
     return r.json() if r.ok else []
 
+def _norm_url(url: str) -> str:
+    """Normalize URL for comparison: strip protocol, www, and trailing slash."""
+    u = url.lower().strip()
+    for prefix in ("https://www.", "http://www.", "https://", "http://"):
+        if u.startswith(prefix):
+            u = u[len(prefix):]
+            break
+    return u.rstrip("/")
+
 def _add_issue(db, site_id, page_id, severity, category, issue_type, description, recommendation, auto_fixable=False):
     db.table("audit_issues").insert({
         "site_id": site_id, "page_id": page_id,
@@ -53,8 +62,10 @@ def run(site_id: str):
             "Sitemap XML não encontrado ou inválido", "Gere um sitemap.xml e configure no robots.txt")
         urls = [site["url"]]
 
-    wp_pages = _wp_get_pages(site) if site["type"] == "wordpress" else []
-    wp_map   = {p["url"]: p for p in wp_pages}
+    wp_pages   = _wp_get_pages(site) if site["type"] == "wordpress" else []
+    wp_map     = {p["url"]: p for p in wp_pages}
+    # Normalized fallback map (handles http/https, www, trailing slash mismatches)
+    wp_map_norm = {_norm_url(p["url"]): p for p in wp_pages}
 
     seen_titles = {}
     seen_descs  = {}
@@ -80,8 +91,11 @@ def run(site_id: str):
             "schema_current":    schema_current,
             "needs_schema_opt":  schema_current is None,
         }
-        # Set post_id from WordPress API if available
-        wp_entry = wp_map.get(url) or wp_map.get(url.rstrip("/") + "/") or wp_map.get(url.rstrip("/"))
+        # Set post_id from WordPress API — try exact then normalized (handles http/https, www, trailing slash)
+        wp_entry = (wp_map.get(url)
+                    or wp_map.get(url.rstrip("/") + "/")
+                    or wp_map.get(url.rstrip("/"))
+                    or wp_map_norm.get(_norm_url(url)))
         if wp_entry:
             page_data["post_id"] = wp_entry.get("id")
         if existing:

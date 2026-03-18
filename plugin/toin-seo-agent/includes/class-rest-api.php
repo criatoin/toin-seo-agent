@@ -25,7 +25,7 @@ class TOIN_SEO_REST_API {
             'callback'            => [$this, 'get_page'],
             'permission_callback' => $auth,
             'args'                => [
-                'id' => ['required' => true, 'validate_callback' => 'is_numeric'],
+                'id' => ['required' => true, 'validate_callback' => fn($v) => is_numeric($v)],
             ],
         ]);
 
@@ -34,7 +34,7 @@ class TOIN_SEO_REST_API {
             'callback'            => [$this, 'update_meta'],
             'permission_callback' => $auth,
             'args'                => [
-                'id' => ['required' => true, 'validate_callback' => 'is_numeric'],
+                'id' => ['required' => true, 'validate_callback' => fn($v) => is_numeric($v)],
             ],
         ]);
 
@@ -43,7 +43,7 @@ class TOIN_SEO_REST_API {
             'callback'            => [$this, 'update_schema'],
             'permission_callback' => $auth,
             'args'                => [
-                'id' => ['required' => true, 'validate_callback' => 'is_numeric'],
+                'id' => ['required' => true, 'validate_callback' => fn($v) => is_numeric($v)],
             ],
         ]);
 
@@ -52,7 +52,7 @@ class TOIN_SEO_REST_API {
             'callback'            => [$this, 'update_canonical'],
             'permission_callback' => $auth,
             'args'                => [
-                'id' => ['required' => true, 'validate_callback' => 'is_numeric'],
+                'id' => ['required' => true, 'validate_callback' => fn($v) => is_numeric($v)],
             ],
         ]);
 
@@ -61,7 +61,7 @@ class TOIN_SEO_REST_API {
             'callback'            => [$this, 'update_images_alt'],
             'permission_callback' => $auth,
             'args'                => [
-                'id' => ['required' => true, 'validate_callback' => 'is_numeric'],
+                'id' => ['required' => true, 'validate_callback' => fn($v) => is_numeric($v)],
             ],
         ]);
     }
@@ -80,8 +80,17 @@ class TOIN_SEO_REST_API {
     }
 
     public function get_pages(): WP_REST_Response {
+        // Include all public post types (custom post types like portfolio, services, team, etc.)
+        $excluded   = ['attachment', 'revision', 'nav_menu_item', 'custom_css',
+                       'customize_changeset', 'wp_global_styles', 'wp_template',
+                       'wp_template_part', 'wp_navigation', 'wp_font_face', 'wp_font_family'];
+        $post_types = array_values(array_filter(
+            array_keys(get_post_types(['public' => true])),
+            fn($pt) => !in_array($pt, $excluded)
+        ));
+
         $posts = get_posts([
-            'post_type'      => ['post', 'page'],
+            'post_type'      => $post_types,
             'post_status'    => 'publish',
             'posts_per_page' => 500,
             'fields'         => 'ids',

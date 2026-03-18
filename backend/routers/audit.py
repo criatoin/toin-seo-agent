@@ -432,8 +432,19 @@ async def diagnose(site_id: str, user=Depends(require_user)):
         except Exception as e:
             wp_error = str(e)
 
-    # Last 10 execution logs
-    logs_res = db.table("execution_logs").select("job_name,action,status,error_message,created_at").eq("site_id", site_id).order("created_at", desc=True).limit(10).execute()
+    # Last 20 execution logs
+    logs_res = db.table("execution_logs").select("job_name,action,status,error_message,created_at").eq("site_id", site_id).order("created_at", desc=True).limit(20).execute()
+
+    # Last sync-gsc result
+    gsc_log_res = (db.table("execution_logs")
+        .select("status,error_message,created_at,payload")
+        .eq("site_id", site_id)
+        .eq("job_name", "sync-gsc")
+        .neq("status", "started")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute())
+    gsc_last = gsc_log_res.data[0] if gsc_log_res.data else None
 
     return {
         "has_credentials": has_credentials,
@@ -445,6 +456,7 @@ async def diagnose(site_id: str, user=Depends(require_user)):
         "needs_schema":    needs_schema,
         "needs_audit":     (total > 0 and with_post_id == 0 and has_credentials),
         "last_logs":       logs_res.data or [],
+        "gsc_last_sync":   gsc_last,
     }
 
 
