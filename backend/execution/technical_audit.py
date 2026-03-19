@@ -67,11 +67,56 @@ def run(site_id: str):
     # Normalized fallback map (handles http/https, www, trailing slash mismatches)
     wp_map_norm = {_norm_url(p["url"]): p for p in wp_pages}
 
+    # Auto-detect seo_plugin from WP if not yet set on site record
+    if wp_pages and not site.get("seo_plugin"):
+        detected = wp_pages[0].get("seo_plugin")
+        if detected:
+            db.table("sites").update({"seo_plugin": detected}).eq("id", site_id).execute()
+            site["seo_plugin"] = detected
+
+    # ── Phase A: Link ALL sitemap URLs to WP post_ids (even uncrawled ones) ──
+    # This ensures every page in the DB gets a post_id if it exists in WP,
+    # regardless of whether it gets fully crawled below.
+    for url in urls:
+        wp_entry = (wp_map.get(url)
+                    or wp_map.get(url.rstrip("/") + "/")
+                    or wp_map.get(url.rstrip("/"))
+                    or wp_map_norm.get(_norm_url(url)))
+        if not wp_entry:
+            continue
+        existing = db.table("pages").select("id,post_id").eq("site_id", site_id).eq("url", url).execute().data
+        update_data = {
+            "post_id":   wp_entry.get("id"),
+            "post_type": wp_entry.get("post_type"),
+        }
+        if existing:
+            # Only update if post_id is missing or changed
+            if not existing[0].get("post_id") or existing[0]["post_id"] != wp_entry.get("id"):
+                db.table("pages").update(update_data).eq("id", existing[0]["id"]).execute()
+        else:
+            # Create minimal page record with post_id
+            db.table("pages").insert({
+                "site_id": site_id, "url": url,
+                **update_data,
+                "has_empty_meta": True,
+                "needs_schema_opt": True,
+            }).execute()
+
+    # Also link WP pages that aren't in the sitemap (e.g. draft→published, custom post types)
+    for wp_url, wp_entry in wp_map.items():
+        existing = db.table("pages").select("id,post_id").eq("site_id", site_id).eq("url", wp_url).execute().data
+        if existing and not existing[0].get("post_id"):
+            db.table("pages").update({
+                "post_id":   wp_entry.get("id"),
+                "post_type": wp_entry.get("post_type"),
+            }).eq("id", existing[0]["id"]).execute()
+
+    # ── Phase B: Crawl pages for SEO data (limited to avoid timeout) ──
     seen_titles = {}
     seen_descs  = {}
 
     crawl_results = []
-    for url in urls[:200]:  # limit to 200 pages per audit
+    for url in urls[:500]:  # crawl up to 500 pages per audit
         crawl = crawl_page(url)
         crawl_results.append(crawl)
         if crawl.get("error") or crawl.get("status_code", 200) not in (200, 301, 302):
@@ -93,13 +138,7 @@ def run(site_id: str):
             "schema_current":    schema_current,
             "needs_schema_opt":  schema_current is None,
         }
-        # Set post_id from WordPress API — try exact then normalized (handles http/https, www, trailing slash)
-        wp_entry = (wp_map.get(url)
-                    or wp_map.get(url.rstrip("/") + "/")
-                    or wp_map.get(url.rstrip("/"))
-                    or wp_map_norm.get(_norm_url(url)))
-        if wp_entry:
-            page_data["post_id"] = wp_entry.get("id")
+        # post_id already linked in Phase A above
         if existing:
             db.table("pages").update(page_data).eq("id", existing[0]["id"]).execute()
             page_id = existing[0]["id"]
@@ -347,6 +386,25 @@ def run(site_id: str):
                 }).execute()
     except Exception as e:
         log(site_id, "technical-audit", "webp_check", "error", error=str(e))
+
+    # ── Phase C: Fix flags for pages that were NOT crawled but exist in DB ──
+    # Pages created by Phase A or previous audits may have stale flags.
+    # Update has_empty_meta and needs_schema_opt based on actual current values.
+    try:
+        uncrawled = (db.table("pages")
+            .select("id,meta_desc_current,schema_current,has_empty_meta,needs_schema_opt")
+            .eq("site_id", site_id)
+            .execute().data)
+        for p in uncrawled:
+            real_empty_meta  = not bool(p.get("meta_desc_current"))
+            real_needs_schema = p.get("schema_current") is None
+            if p.get("has_empty_meta") != real_empty_meta or p.get("needs_schema_opt") != real_needs_schema:
+                db.table("pages").update({
+                    "has_empty_meta":   real_empty_meta,
+                    "needs_schema_opt": real_needs_schema,
+                }).eq("id", p["id"]).execute()
+    except Exception as e:
+        log(site_id, "technical-audit", "fix_flags", "error", error=str(e))
 
     db.table("sites").update({"audit_completed_at": datetime.now(timezone.utc).isoformat()}).eq("id", site_id).execute()
     log(site_id, "technical-audit", "complete_audit", "success")

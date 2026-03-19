@@ -89,24 +89,37 @@ class TOIN_SEO_REST_API {
             fn($pt) => !in_array($pt, $excluded)
         ));
 
-        $posts = get_posts([
-            'post_type'      => $post_types,
-            'post_status'    => 'publish',
-            'posts_per_page' => 500,
-            'fields'         => 'ids',
-        ]);
+        $seo_plugin = TOIN_SEO_Plugins::detect();
+        $result     = [];
+        $page       = 1;
+        $per_page   = 500;
 
-        $result = array_map(function (int $id): array {
-            $meta = TOIN_SEO_Plugins::get_meta($id);
-            return [
-                'id'          => $id,
-                'url'         => get_permalink($id),
-                'post_type'   => get_post_type($id),
-                'title'       => $meta['title'] ?: get_the_title($id),
-                'description' => $meta['description'],
-                'seo_plugin'  => TOIN_SEO_Plugins::detect(),
-            ];
-        }, $posts);
+        // Paginate through ALL published posts (not just first 500)
+        do {
+            $posts = get_posts([
+                'post_type'      => $post_types,
+                'post_status'    => 'publish',
+                'posts_per_page' => $per_page,
+                'paged'          => $page,
+                'fields'         => 'ids',
+                'orderby'        => 'ID',
+                'order'          => 'ASC',
+            ]);
+
+            foreach ($posts as $id) {
+                $meta     = TOIN_SEO_Plugins::get_meta($id);
+                $result[] = [
+                    'id'          => $id,
+                    'url'         => get_permalink($id),
+                    'post_type'   => get_post_type($id),
+                    'title'       => $meta['title'] ?: get_the_title($id),
+                    'description' => $meta['description'],
+                    'seo_plugin'  => $seo_plugin,
+                ];
+            }
+
+            $page++;
+        } while (count($posts) === $per_page);
 
         return new WP_REST_Response($result);
     }
