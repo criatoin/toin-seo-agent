@@ -228,40 +228,59 @@ def run(site_id: str):
     except Exception as e:
         log(site_id, "technical-audit", "robots_check", "error", error=str(e))
 
-    # ── CHECK 2.2: Páginas Órfãs ───────────────────────────────────────────
+    # ── CHECK 2.2: Páginas Órfãs (optimized — batch, no per-URL queries) ───
     try:
         all_linked: set[str] = set()
         for crawl in crawl_results:
             for link in crawl.get("internal_links", []):
                 all_linked.add(link)
 
-        for url in urls:
-            if url not in all_linked:
-                page_res = db.table("pages").select("id").eq("site_id", site_id).eq("url", url).execute()
-                pid = page_res.data[0]["id"] if page_res.data else None
-                existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "orphan_page").eq("page_id", pid).execute().data if pid else []
-                if not existing:
-                    db.table("audit_issues").insert({
-                        "site_id": site_id,
-                        "page_id": pid,
-                        "severity": "important",
-                        "category": "links",
-                        "issue_type": "orphan_page",
-                        "description": f"Página órfã: {url}",
-                        "recommendation": "Adicione pelo menos 1 link interno apontando para esta página a partir de uma página de maior tráfego.",
-                        "auto_fixable": False,
-                    }).execute()
+        # Only check crawled URLs for orphan status (not all 2000+ sitemap URLs)
+        crawled_urls_set = {c["url"] for c in crawl_results}
+        orphan_urls = [u for u in crawled_urls_set if u not in all_linked]
+
+        if orphan_urls:
+            # Batch-fetch page IDs for orphan URLs
+            orphan_page_ids = {}
+            for i in range(0, len(orphan_urls), 50):
+                batch = orphan_urls[i:i+50]
+                res = db.table("pages").select("id,url").eq("site_id", site_id).in_("url", batch).execute()
+                for p in (res.data or []):
+                    orphan_page_ids[p["url"]] = p["id"]
+
+            # Batch-fetch existing orphan issues to avoid duplicates
+            existing_orphan_pids = set()
+            ex_res = db.table("audit_issues").select("page_id").eq("site_id", site_id).eq("issue_type", "orphan_page").execute()
+            for r in (ex_res.data or []):
+                if r.get("page_id"):
+                    existing_orphan_pids.add(r["page_id"])
+
+            # Insert only new orphan issues (limit to 200 max to avoid DB bloat)
+            inserted = 0
+            for url in orphan_urls:
+                if inserted >= 200:
+                    break
+                pid = orphan_page_ids.get(url)
+                if pid and pid not in existing_orphan_pids:
+                    _add_issue(db, site_id, pid, "important", "links", "orphan_page",
+                        f"Página órfã: {url}",
+                        "Adicione pelo menos 1 link interno apontando para esta página.")
+                    inserted += 1
     except Exception as e:
         log(site_id, "technical-audit", "orphan_pages_check", "error", error=str(e))
 
-    # ── CHECK 2.3: Links Internos Quebrados ────────────────────────────────
+    # ── CHECK 2.3: Links Internos Quebrados (limit HTTP checks) ──────────
     try:
         broken_found: set[str] = set()
-        for crawl in crawl_results:
+        checked: set[str] = set()
+        for crawl in crawl_results[:100]:  # only check links from first 100 crawled pages
             source_url = crawl["url"]
             for link in crawl.get("internal_links", []):
-                if link in broken_found:
+                if link in broken_found or link in checked:
                     continue
+                if len(checked) >= 200:  # limit total HTTP checks
+                    break
+                checked.add(link)
                 try:
                     hr = requests.head(link, timeout=5, allow_redirects=True,
                                        headers={"User-Agent": "TOINSEOBot/1.0"})
@@ -269,49 +288,34 @@ def run(site_id: str):
                         broken_found.add(link)
                         src_page = db.table("pages").select("id").eq("site_id", site_id).eq("url", source_url).execute().data
                         pid = src_page[0]["id"] if src_page else None
-                        db.table("audit_issues").insert({
-                            "site_id": site_id,
-                            "page_id": pid,
-                            "severity": "important",
-                            "category": "links",
-                            "issue_type": "broken_internal_link",
-                            "description": f"Link quebrado: {source_url} → {link} (404)",
-                            "recommendation": f"Remova ou corrija o link para {link} na página {source_url}.",
-                            "auto_fixable": False,
-                        }).execute()
+                        _add_issue(db, site_id, pid, "important", "links", "broken_internal_link",
+                            f"Link quebrado: {source_url} → {link} (404)",
+                            f"Remova ou corrija o link para {link} na página {source_url}.")
                 except Exception:
                     pass
                 if len(broken_found) >= 20:
                     break
-            if len(broken_found) >= 20:
+            if len(broken_found) >= 20 or len(checked) >= 200:
                 break
     except Exception as e:
         log(site_id, "technical-audit", "broken_links_check", "error", error=str(e))
 
     # ── CHECK 2.4: Redirect Chains ─────────────────────────────────────────
     try:
-        for url in urls[:50]:  # Limita para não exceder timeout
+        for url in urls[:30]:
             chain = _check_redirect_chain(url)
             if chain:
-                existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "redirect_chain").eq("description", f"Redirect chain: {' → '.join(chain)}").execute().data
+                desc = f"Redirect chain: {' → '.join(chain)}"
+                existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "redirect_chain").eq("description", desc).execute().data
                 if not existing:
-                    db.table("audit_issues").insert({
-                        "site_id": site_id,
-                        "page_id": None,
-                        "severity": "important",
-                        "category": "indexation",
-                        "issue_type": "redirect_chain",
-                        "description": f"Redirect chain: {' → '.join(chain)}",
-                        "recommendation": f"Configure redirect direto de {chain[0]} para {chain[-1]}, eliminando os passos intermediários.",
-                        "auto_fixable": False,
-                    }).execute()
+                    _add_issue(db, site_id, None, "important", "indexation", "redirect_chain",
+                        desc, f"Configure redirect direto de {chain[0]} para {chain[-1]}.")
     except Exception as e:
         log(site_id, "technical-audit", "redirect_chain_check", "error", error=str(e))
 
-    # ── CHECK 2.5: Profundidade de Cliques ─────────────────────────────────
+    # ── CHECK 2.5: Profundidade de Cliques (in-memory only, no DB queries) ─
     try:
         from collections import deque
-        from site_crawler import normalize_url as _norm
         depth_map: dict[str, int] = {site_url.rstrip("/"): 0}
         queue = deque([(site_url.rstrip("/"), 0)])
         crawl_map = {c["url"]: c for c in crawl_results}
@@ -328,35 +332,43 @@ def run(site_id: str):
                     depth_map[link] = depth + 1
                     queue.append((link, depth + 1))
 
-        for url, depth in depth_map.items():
-            if depth > 3:
-                page_res = db.table("pages").select("id").eq("site_id", site_id).eq("url", url).execute().data
-                pid = page_res[0]["id"] if page_res else None
-                existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "deep_page").eq("page_id", pid).execute().data if pid else []
-                if not existing:
-                    db.table("audit_issues").insert({
-                        "site_id": site_id,
-                        "page_id": pid,
-                        "severity": "improvement",
-                        "category": "structure",
-                        "issue_type": "deep_page",
-                        "description": f"Página a {depth} cliques da homepage: {url}",
-                        "recommendation": "Adicione links internos a partir de páginas com maior tráfego para reduzir a profundidade para ≤3 cliques.",
-                        "auto_fixable": False,
-                    }).execute()
+        deep_urls = [u for u, d in depth_map.items() if d > 3]
+        if deep_urls:
+            # Batch-fetch page IDs
+            deep_page_map = {}
+            for i in range(0, len(deep_urls), 50):
+                batch = deep_urls[i:i+50]
+                res = db.table("pages").select("id,url").eq("site_id", site_id).in_("url", batch).execute()
+                for p in (res.data or []):
+                    deep_page_map[p["url"]] = p["id"]
+
+            existing_deep = set()
+            ex_res = db.table("audit_issues").select("page_id").eq("site_id", site_id).eq("issue_type", "deep_page").execute()
+            for r in (ex_res.data or []):
+                if r.get("page_id"):
+                    existing_deep.add(r["page_id"])
+
+            for url in deep_urls[:100]:  # cap at 100
+                pid = deep_page_map.get(url)
+                depth = depth_map[url]
+                if pid and pid not in existing_deep:
+                    _add_issue(db, site_id, pid, "improvement", "structure", "deep_page",
+                        f"Página a {depth} cliques da homepage: {url}",
+                        "Adicione links internos para reduzir a profundidade para ≤3 cliques.")
     except Exception as e:
         log(site_id, "technical-audit", "deep_page_check", "error", error=str(e))
 
-    # ── CHECK 2.6: Imagens sem WebP ────────────────────────────────────────
+    # ── CHECK 2.6: Imagens sem WebP (check only homepage, not all pages) ──
     try:
+        from bs4 import BeautifulSoup as _BS
         no_webp_count = 0
-        for crawl in crawl_results:
+        # Only check first 5 crawled pages for WebP (not all 500)
+        for crawl in crawl_results[:5]:
             src_url = crawl["url"]
             html_res = requests.get(src_url, timeout=5, headers={"User-Agent": "TOINSEOBot/1.0"})
             if not html_res.ok:
                 continue
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html_res.text, "html.parser")
+            soup = _BS(html_res.text, "html.parser")
             for img in soup.find_all("img", src=True):
                 src = img["src"]
                 if any(src.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png"]):
@@ -374,16 +386,9 @@ def run(site_id: str):
         if no_webp_count > 0:
             existing = db.table("audit_issues").select("id").eq("site_id", site_id).eq("issue_type", "images_no_webp").execute().data
             if not existing:
-                db.table("audit_issues").insert({
-                    "site_id": site_id,
-                    "page_id": None,
-                    "severity": "improvement",
-                    "category": "speed",
-                    "issue_type": "images_no_webp",
-                    "description": f"Pelo menos {no_webp_count} imagens sem versão WebP detectadas",
-                    "recommendation": "Configure LiteSpeed Cache → Image Optimization → WebP Replacement para converter automaticamente JPG/PNG para WebP.",
-                    "auto_fixable": False,
-                }).execute()
+                _add_issue(db, site_id, None, "improvement", "speed", "images_no_webp",
+                    f"Pelo menos {no_webp_count} imagens sem versão WebP detectadas",
+                    "Configure Image Optimization para converter JPG/PNG para WebP.")
     except Exception as e:
         log(site_id, "technical-audit", "webp_check", "error", error=str(e))
 
